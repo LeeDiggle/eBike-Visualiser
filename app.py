@@ -133,44 +133,61 @@ if uploaded_file:
         f"{df['distance_km'].max():.1f} km"
     )
 
-    st.subheader("Route Map")
+    # =========================
+# 🗺️ MAP (ISOLATED FROM CHARTS)
+# =========================
 
-    import plotly.graph_objects as go
-    # clean gps explicitly (no dataframe reuse risk)
-    lat = pd.to_numeric(df["position_lat"], errors="coerce").dropna()
-    lon = pd.to_numeric(df["position_long"], errors="coerce").dropna()
+st.subheader("Route Map")
 
-    # align lengths safely (critical fix)
-    min_len = min(len(lat), len(lon))
-    lat = lat.iloc[:min_len].astype(float)
-    lon = lon.iloc[:min_len].astype(float)
+import plotly.graph_objects as go
 
-    st.write("GPS points:", len(lat))
+# IMPORTANT: rebuild RAW GPS from original FIT data (not modified df)
+gps_data = []
+for record in fitfile.get_messages("record"):
+    row = {}
+    for field in record:
+        row[field.name] = field.value
+    gps_data.append(row)
 
-    # IMPORTANT: force numpy arrays (Plotly stability fix)
-    lat_vals = lat.to_numpy()
-    lon_vals = lon.to_numpy()
-   
+gps_df = pd.DataFrame(gps_data)
+
+# extract GPS only
+gps_df = gps_df[["position_lat", "position_long"]].copy()
+
+# convert safely
+gps_df["lat"] = pd.to_numeric(gps_df["position_lat"], errors="coerce")
+gps_df["lon"] = pd.to_numeric(gps_df["position_long"], errors="coerce")
+
+# remove invalid rows
+gps_df = gps_df.dropna(subset=["lat", "lon"]).reset_index(drop=True)
+
+st.write("GPS points:", len(gps_df))
+
+# safety check
+if len(gps_df) < 2:
+    st.warning("Not enough GPS data to plot route")
+else:
+
     fig = go.Figure()
 
     fig.add_trace(go.Scattermapbox(
-     lat=lat_vals,
-     lon=lon_vals,
-     mode="lines",
-     line=dict(width=3, color="blue")
+        lat=gps_df["lat"].tolist(),
+        lon=gps_df["lon"].tolist(),
+        mode="lines",
+        line=dict(width=3, color="blue")
     ))
 
     fig.update_layout(
-     mapbox=dict(
-        style="open-street-map",
-        center=dict(
-             lat=float(lat_vals[0]),
-             lon=float(lon_vals[0])
-         ),
-         zoom=12
-     ),
-     margin=dict(l=0, r=0, t=0, b=0),
-     height=500
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(
+                lat=float(gps_df["lat"].iloc[0]),
+                lon=float(gps_df["lon"].iloc[0])
+            ),
+            zoom=12
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=500
     )
 
     st.plotly_chart(fig, use_container_width=True)
