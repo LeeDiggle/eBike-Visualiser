@@ -22,6 +22,9 @@ if uploaded_file:
 
     df = pd.DataFrame(data)
 
+    st.write(df.columns.tolist())
+st.write(df[["power", "altitude", "speed", "distance"]].head(20))
+
     # -------------------------
     # GPS (we know this works now)
     # -------------------------
