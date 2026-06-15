@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from fitparse import FitFile
+import numpy as np
 
-st.title("🚴 E-Bike Ride Visualiser (Clean View)")
+st.title("🚴 E-Bike Ride Visualiser (Clean + Smoothed)")
 
 uploaded_file = st.file_uploader("Upload your ride file")
 
@@ -15,7 +16,6 @@ if uploaded_file:
     fitfile = FitFile(uploaded_file)
 
     data = []
-
     for record in fitfile.get_messages("record"):
         row = {}
         for field in record:
@@ -29,62 +29,70 @@ if uploaded_file:
     df = pd.DataFrame(data)
 
     # -----------------------
-    # Sort + prepare distance
+    # Basic cleanup
     # -----------------------
-    if "distance" in df.columns:
-        df = df.sort_values("distance")
-        df["distance_km"] = df["distance"] / 1000
-    else:
+    if "distance" not in df.columns:
         st.error("No distance data found")
         st.stop()
 
+    df = df.sort_values("distance").drop_duplicates(subset=["distance"])
+    df["distance_km"] = df["distance"] / 1000
+
+    # Ensure numeric
+    for col in ["altitude", "power", "speed"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Remove impossible power spikes (common FIT noise)
+    if "power" in df.columns:
+        df.loc[df["power"] <= 0, "power"] = np.nan
+        df.loc[df["power"] > 1200, "power"] = np.nan  # sanity cap
+
     # -----------------------
-    # Show available columns
+    # Downsample for readability (key fix)
+    # -----------------------
+    df = df.iloc[::3].reset_index(drop=True)
+
+    # -----------------------
+    # Smoothing (critical for Bosch Flow data)
+    # -----------------------
+    if "altitude" in df.columns:
+        df["altitude_smooth"] = df["altitude"].rolling(40, min_periods=1).median()
+
+    if "power" in df.columns:
+        df["power_smooth"] = df["power"].rolling(40, min_periods=1).median()
+
+    # -----------------------
+    # Gradient (stable version)
+    # -----------------------
+    df["distance_diff"] = df["distance"].diff()
+    df["alt_diff"] = df["altitude_smooth"].diff() if "altitude_smooth" in df.columns else np.nan
+
+    df["gradient"] = (df["alt_diff"] / df["distance_diff"]) * 100
+    df["gradient"] = df["gradient"].replace([np.inf, -np.inf], np.nan)
+    df["gradient"] = df["gradient"].clip(-12, 12)
+    df["gradient"] = df["gradient"].rolling(20, min_periods=1).mean()
+
+    # -----------------------
+    # Column preview
     # -----------------------
     st.subheader("Available data columns")
     st.write(df.columns.tolist())
 
     # -----------------------
-    # Safe defaults
+    # MAIN PLOT
     # -----------------------
-    for col in ["altitude", "power"]:
-        if col not in df.columns:
-            df[col] = None
-
-    # Keep valid rows
-    df = df.dropna(subset=["distance", "altitude"])
-
-    # -----------------------
-    # Smooth data (IMPORTANT for readability)
-    # -----------------------
-    df["altitude_smooth"] = df["altitude"].rolling(15, min_periods=1).mean()
-    df["power_smooth"] = df["power"].rolling(15, min_periods=1).mean()
-
-    # -----------------------
-    # Gradient calculation
-    # -----------------------
-    df["gradient"] = df["altitude_smooth"].diff() / df["distance"].diff() * 100
-    df["gradient"] = df["gradient"].replace([float("inf"), -float("inf")], None)
-    df["gradient"] = df["gradient"].clip(-15, 15)
-
-    # -----------------------
-    # Preview table
-    # -----------------------
-    st.subheader("Data preview")
-    st.dataframe(df[["distance_km", "altitude_smooth", "power_smooth", "gradient"]].head(20))
-
-    # -----------------------
-    # MAIN CHART: Elevation + Power
-    # -----------------------
-    st.subheader("Elevation + Power vs Distance")
+    st.subheader("Elevation + Power (Smoothed)")
 
     fig, ax1 = plt.subplots(figsize=(12, 5))
 
-    ax1.plot(df["distance_km"], df["altitude_smooth"], label="Elevation", linewidth=2)
+    if "altitude_smooth" in df.columns:
+        ax1.plot(df["distance_km"], df["altitude_smooth"], linewidth=2, label="Elevation")
+
     ax1.set_xlabel("Distance (km)")
     ax1.set_ylabel("Altitude (m)")
 
-    if df["power"].notna().any():
+    if "power_smooth" in df.columns:
         ax2 = ax1.twinx()
         ax2.plot(df["distance_km"], df["power_smooth"], color="orange", alpha=0.7, label="Power")
         ax2.set_ylabel("Power (W)")
@@ -92,9 +100,9 @@ if uploaded_file:
     st.pyplot(fig, use_container_width=True)
 
     # -----------------------
-    # Gradient chart
+    # Gradient plot
     # -----------------------
-    st.subheader("Gradient Profile")
+    st.subheader("Gradient Profile (Cleaned)")
 
     fig2, ax = plt.subplots(figsize=(12, 3))
     ax.plot(df["distance_km"], df["gradient"])
@@ -104,7 +112,7 @@ if uploaded_file:
     st.pyplot(fig2, use_container_width=True)
 
     # -----------------------
-    # Summary stats
+    # Summary
     # -----------------------
     st.subheader("Ride Summary")
 
@@ -112,12 +120,12 @@ if uploaded_file:
 
     col1.metric(
         "Max Power",
-        f"{df['power'].max():.0f} W" if df["power"].notna().any() else "N/A"
+        f"{np.nanmax(df['power']):.0f} W" if "power" in df.columns else "N/A"
     )
 
     col2.metric(
         "Max Gradient",
-        f"{df['gradient'].max():.1f}%"
+        f"{np.nanmax(df['gradient']):.1f}%"
     )
 
     col3.metric(
