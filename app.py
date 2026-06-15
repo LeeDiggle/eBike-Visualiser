@@ -1,11 +1,9 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Ride Dashboard (Fixed)")
+st.title("FIT Debug - Truth Check")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -13,95 +11,61 @@ if uploaded_file:
 
     fitfile = FitFile(uploaded_file)
 
-    # -------------------------
-    # FIXED RECORD PARSING
-    # -------------------------
     data = []
-
     for record in fitfile.get_messages("record"):
         row = {}
-
         for field in record:
-            # ✅ FIX: correct dictionary assignment
             row[field.name] = field.value
-
         data.append(row)
 
     df = pd.DataFrame(data)
 
-    # -------------------------
-    # GPS
-    # -------------------------
-    df = df.dropna(subset=["position_lat", "position_long"])
+    st.subheader("1. Raw column check")
+    st.write(df.columns.tolist())
 
-    df["lat"] = df["position_lat"] * (180 / 2**31)
-    df["lon"] = df["position_long"] * (180 / 2**31)
+    st.subheader("2. Power / Altitude raw stats")
+    cols = ["power", "altitude", "speed", "distance"]
 
-    # -------------------------
-    # NUMERIC FIELDS
-    # -------------------------
-    for col in ["distance", "speed", "power", "altitude"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+    for c in cols:
+        if c in df.columns:
+            st.write(c, "non-null count:", df[c].notna().sum())
+            st.write(c, "sample:", df[c].dropna().head(10).tolist())
+        else:
+            st.write(c, "MISSING")
 
-    df["distance_km"] = df["distance"] / 1000
+    st.subheader("3. GPS check")
 
-    # -------------------------
-    # SMOOTHING (for readability)
-    # -------------------------
-    df["alt_smooth"] = df["altitude"].rolling(10, min_periods=1).median()
-    df["power_smooth"] = df["power"].rolling(10, min_periods=1).median()
+    if "position_lat" in df.columns and "position_long" in df.columns:
+        st.write("GPS present:", True)
 
-    # -------------------------
-    # MAP
-    # -------------------------
-    st.subheader("🗺️ Route Map")
+        df = df.dropna(subset=["position_lat", "position_long"])
 
-    fig_map = go.Figure()
+        lat = df["position_lat"] * (180 / 2**31)
+        lon = df["position_long"] * (180 / 2**31)
 
-    fig_map.add_trace(go.Scattermapbox(
-        lat=df["lat"],
-        lon=df["lon"],
-        mode="lines",
-        line=dict(width=4, color="blue")
-    ))
+        st.write("lat sample:", lat.head(10).tolist())
+        st.write("lon sample:", lon.head(10).tolist())
 
-    fig_map.update_layout(
-        mapbox=dict(
-            style="open-street-map",
-            center=dict(lat=df["lat"].mean(), lon=df["lon"].mean()),
-            zoom=12
-        ),
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=600
-    )
+        st.subheader("MAP")
 
-    st.plotly_chart(fig_map, use_container_width=True)
+        fig = go.Figure()
+        fig.add_trace(go.Scattermapbox(
+            lat=lat,
+            lon=lon,
+            mode="lines"
+        ))
 
-    # -------------------------
-    # CHARTS
-    # -------------------------
-    st.subheader("📊 Elevation & Power")
+        fig.update_layout(
+            mapbox=dict(
+                style="open-street-map",
+                center=dict(lat=lat.mean(), lon=lon.mean()),
+                zoom=12
+            ),
+            margin=dict(l=0, r=0, t=0, b=0),
+            height=600
+        )
 
-    fig, ax1 = plt.subplots()
+        st.plotly_chart(fig, use_container_width=True)
 
-    ax1.plot(df["distance_km"], df["alt_smooth"], label="Altitude")
-
-    ax2 = ax1.twinx()
-    ax2.plot(df["distance_km"], df["power_smooth"], color="orange", label="Power")
-
-    st.pyplot(fig)
-
-    # -------------------------
-    # SUMMARY
-    # -------------------------
-    st.subheader("Summary")
-
-    col1, col2 = st.columns(2)
-
-    col1.metric("Distance (km)", f"{df['distance_km'].max():.1f}")
-
-    if df["power"].notna().any():
-        col2.metric("Max Power", f"{df['power'].max():.0f} W")
     else:
-        col2.metric("Max Power", "N/A")
+        st.error("No GPS found")
