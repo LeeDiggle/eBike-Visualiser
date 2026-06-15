@@ -133,45 +133,44 @@ if uploaded_file:
         f"{df['distance_km'].max():.1f} km"
     )
 
-st.subheader("Route Map")
+    st.subheader("Route Map")
 
-import plotly.graph_objects as go
+    import plotly.graph_objects as go
+    # clean gps explicitly (no dataframe reuse risk)
+    lat = pd.to_numeric(df["position_lat"], errors="coerce").dropna()
+    lon = pd.to_numeric(df["position_long"], errors="coerce").dropna()
 
-# clean gps explicitly (no dataframe reuse risk)
-lat = pd.to_numeric(df["position_lat"], errors="coerce").dropna()
-lon = pd.to_numeric(df["position_long"], errors="coerce").dropna()
+    # align lengths safely (critical fix)
+    min_len = min(len(lat), len(lon))
+    lat = lat.iloc[:min_len].astype(float)
+    lon = lon.iloc[:min_len].astype(float)
 
-# align lengths safely (critical fix)
-min_len = min(len(lat), len(lon))
-lat = lat.iloc[:min_len].astype(float)
-lon = lon.iloc[:min_len].astype(float)
+    st.write("GPS points:", len(lat))
 
-st.write("GPS points:", len(lat))
+    # IMPORTANT: force numpy arrays (Plotly stability fix)
+    lat_vals = lat.to_numpy()
+    lon_vals = lon.to_numpy()
+   
+    fig = go.Figure()
 
-# IMPORTANT: force numpy arrays (Plotly stability fix)
-lat_vals = lat.to_numpy()
-lon_vals = lon.to_numpy()
+    fig.add_trace(go.Scattermapbox(
+     lat=lat_vals,
+     lon=lon_vals,
+     mode="lines",
+     line=dict(width=3, color="blue")
+    ))
 
-fig = go.Figure()
-
-fig.add_trace(go.Scattermapbox(
-    lat=lat_vals,
-    lon=lon_vals,
-    mode="lines",
-    line=dict(width=3, color="blue")
-))
-
-fig.update_layout(
-    mapbox=dict(
+    fig.update_layout(
+     mapbox=dict(
         style="open-street-map",
         center=dict(
-            lat=float(lat_vals[0]),
-            lon=float(lon_vals[0])
-        ),
-        zoom=12
-    ),
-    margin=dict(l=0, r=0, t=0, b=0),
-    height=500
-)
+             lat=float(lat_vals[0]),
+             lon=float(lon_vals[0])
+         ),
+         zoom=12
+     ),
+     margin=dict(l=0, r=0, t=0, b=0),
+     height=500
+    )
 
-st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
