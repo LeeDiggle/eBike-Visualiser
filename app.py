@@ -24,7 +24,11 @@ if uploaded_file:
     st.write(df.head())
 
     # Basic cleaning
-    df = df.dropna(subset=["heart_rate", "altitude", "distance"])
+    # Only keep columns that actually exist
+available_columns = [col for col in ["heart_rate", "altitude", "distance"] if col in df.columns]
+
+if available_columns:
+    df = df.dropna(subset=available_columns)
 
     df['elevation_diff'] = df['altitude'].diff()
     df['distance_diff'] = df['distance'].diff()
