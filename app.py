@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from fitparse import FitFile
 
-st.title("🚴 eBike Ride Dashboard")
+st.title("🚴 E-Bike Ride Visualiser")
 
 uploaded_file = st.file_uploader("Upload your ride file")
 
@@ -18,38 +18,41 @@ if uploaded_file:
             row[field.name] = field.value
         data.append(row)
 
-    df = pd.DataFrame(data)
+    if not data:
+        st.error("No data found in file")
+    else:
+        df = pd.DataFrame(data)
 
-    st.write("Raw data preview:")
-    st.write(df.head())
+        # Show available columns (VERY useful for debugging)
+        st.write("Available data columns:", df.columns.tolist())
 
-    # Basic cleaning
-    # Only keep columns that actually exist
-available_columns = [col for col in ["heart_rate", "altitude", "distance"] if col in df.columns]
+        # Drop NA only for columns that exist
+        relevant_cols = [c for c in ["heart_rate", "altitude", "distance", "speed"] if c in df.columns]
+        if relevant_cols:
+            df = df.dropna(subset=relevant_cols)
 
-if available_columns:
-    df = df.dropna(subset=available_columns)
+        st.write("Preview of your data:")
+        st.dataframe(df.head())
 
-    df['elevation_diff'] = df['altitude'].diff()
-    df['distance_diff'] = df['distance'].diff()
-    df['gradient'] = (df['elevation_diff'] / df['distance_diff']) * 100
+        # --- Plot ---
+        if 'timestamp' in df.columns:
+            fig, ax1 = plt.subplots()
 
-    # Plot 1: Heart Rate over time
-    st.subheader("❤️ Heart Rate Over Time")
-    fig1, ax1 = plt.subplots()
-    ax1.plot(df['timestamp'], df['heart_rate'])
-    st.pyplot(fig1)
+            # Primary axis: HR or Speed
+            if 'heart_rate' in df.columns:
+                ax1.plot(df['timestamp'], df['heart_rate'])
+                ax1.set_ylabel('Heart Rate')
+            elif 'speed' in df.columns:
+                ax1.plot(df['timestamp'], df['speed'])
+                ax1.set_ylabel('Speed')
 
-    # Plot 2: Gradient over time
-    st.subheader("⛰️ Gradient Over Time")
-    fig2, ax2 = plt.subplots()
-    ax2.plot(df['timestamp'], df['gradient'])
-    st.pyplot(fig2)
+            # Secondary axis: Altitude
+            if 'altitude' in df.columns:
+                ax2 = ax1.twinx()
+                ax2.plot(df['timestamp'], df['altitude'])
+                ax2.set_ylabel('Altitude')
 
-    # Plot 3: HR vs Gradient
-    st.subheader("📊 Effort vs Gradient")
-    fig3, ax3 = plt.subplots()
-    ax3.scatter(df['gradient'], df['heart_rate'])
-    ax3.set_xlabel("Gradient (%)")
-    ax3.set_ylabel("Heart Rate")
-    st.pyplot(fig3)
+            ax1.set_xlabel("Time")
+            st.pyplot(fig)
+        else:
+            st.warning("No timestamp data available for plotting")
