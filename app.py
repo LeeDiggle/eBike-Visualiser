@@ -46,26 +46,45 @@ if uploaded_file:
         st.write("lat sample:", lat.head(10).tolist())
         st.write("lon sample:", lon.head(10).tolist())
 
-        st.subheader("MAP")
+        st.subheader("🗺️ Route Map")
 
-        fig = go.Figure()
-        fig.add_trace(go.Scattermapbox(
-            lat=lat,
-            lon=lon,
-            mode="lines"
-        ))
+# FORCE CLEAN GPS DATASET
+map_df = df[["position_lat", "position_long"]].copy()
 
-        fig.update_layout(
-            mapbox=dict(
-                style="open-street-map",
-                center=dict(lat=lat.mean(), lon=lon.mean()),
-                zoom=12
-            ),
-            margin=dict(l=0, r=0, t=0, b=0),
-            height=600
-        )
+map_df = map_df.dropna()
 
-        st.plotly_chart(fig, use_container_width=True)
+map_df["lat"] = map_df["position_lat"].astype(float) * (180 / 2**31)
+map_df["lon"] = map_df["position_long"].astype(float) * (180 / 2**31)
+
+map_df = map_df.dropna(subset=["lat", "lon"])
+
+st.write("GPS points used for map:", len(map_df))
+
+import plotly.graph_objects as go
+
+fig_map = go.Figure()
+
+fig_map.add_trace(go.Scattermapbox(
+    lat=map_df["lat"].tolist(),
+    lon=map_df["lon"].tolist(),
+    mode="lines",
+    line=dict(width=4, color="blue")
+))
+
+fig_map.update_layout(
+    mapbox=dict(
+        style="open-street-map",
+        center=dict(
+            lat=float(map_df["lat"].mean()),
+            lon=float(map_df["lon"].mean())
+        ),
+        zoom=12
+    ),
+    margin=dict(l=0, r=0, t=0, b=0),
+    height=600
+)
+
+st.plotly_chart(fig_map, use_container_width=True)
 
     else:
         st.error("No GPS found")
