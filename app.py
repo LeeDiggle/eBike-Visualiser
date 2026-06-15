@@ -132,3 +132,42 @@ if uploaded_file:
         "Distance",
         f"{df['distance_km'].max():.1f} km"
     )
+
+# -----------------------
+# MAP (ISOLATED ADD-ON)
+# -----------------------
+if "position_lat" in df.columns and "position_long" in df.columns:
+
+    import plotly.graph_objects as go
+
+    map_df = df[["position_lat", "position_long"]].copy()
+    map_df["lat"] = pd.to_numeric(map_df["position_lat"], errors="coerce")
+    map_df["lon"] = pd.to_numeric(map_df["position_long"], errors="coerce")
+
+    map_df = map_df.dropna()
+
+    st.subheader("Route Map")
+
+    fig_map = go.Figure()
+
+    fig_map.add_trace(go.Scattermapbox(
+        lat=map_df["lat"].tolist(),
+        lon=map_df["lon"].tolist(),
+        mode="lines",
+        line=dict(width=3, color="blue")
+    ))
+
+    fig_map.update_layout(
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(
+                lat=float(map_df["lat"].iloc[0]),
+                lon=float(map_df["lon"].iloc[0])
+            ),
+            zoom=12
+        ),
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=500
+    )
+
+    st.plotly_chart(fig_map, use_container_width=True)
