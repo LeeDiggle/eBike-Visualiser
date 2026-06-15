@@ -5,7 +5,7 @@ from fitparse import FitFile
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 
-st.title("🚴 FIT Dashboard (Recovered Stable Version)")
+st.title("🚴 FIT Dashboard (Recovered)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
