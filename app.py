@@ -3,11 +3,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from fitparse import FitFile
 
-st.title("🚴 E-Bike Ride Visualiser")
+st.title("🚴 E-Bike Ride Visualiser (Bosch Flow)")
 
 uploaded_file = st.file_uploader("Upload your ride file")
 
 if uploaded_file:
+
+    # --- Read FIT file ---
     fitfile = FitFile(uploaded_file)
 
     data = []
@@ -20,39 +22,70 @@ if uploaded_file:
 
     if not data:
         st.error("No data found in file")
-    else:
-        df = pd.DataFrame(data)
+        st.stop()
 
-        # Show available columns (VERY useful for debugging)
-        st.write("Available data columns:", df.columns.tolist())
+    df = pd.DataFrame(data)
 
-        # Drop NA only for columns that exist
-        relevant_cols = [c for c in ["heart_rate", "altitude", "distance", "speed"] if c in df.columns]
-        if relevant_cols:
-            df = df.dropna(subset=relevant_cols)
+    # --- Sort by distance (key for Bosch Flow data) ---
+    if "distance" in df.columns:
+        df = df.sort_values("distance")
 
-        st.write("Preview of your data:")
-        st.dataframe(df.head())
+        # Convert to km
+        df["distance_km"] = df["distance"] / 1000
 
-        # --- Plot ---
-        if 'timestamp' in df.columns:
-            fig, ax1 = plt.subplots()
+    # --- Show available columns ---
+    st.subheader("Available data columns")
+    st.write(df.columns.tolist())
 
-            # Primary axis: HR or Speed
-            if 'heart_rate' in df.columns:
-                ax1.plot(df['timestamp'], df['heart_rate'])
-                ax1.set_ylabel('Heart Rate')
-            elif 'speed' in df.columns:
-                ax1.plot(df['timestamp'], df['speed'])
-                ax1.set_ylabel('Speed')
+    # --- Basic cleaning (safe) ---
+    for col in ["altitude", "distance", "power"]:
+        if col not in df.columns:
+            df[col] = None
 
-            # Secondary axis: Altitude
-            if 'altitude' in df.columns:
-                ax2 = ax1.twinx()
-                ax2.plot(df['timestamp'], df['altitude'])
-                ax2.set_ylabel('Altitude')
+    df = df.dropna(subset=["distance", "altitude"])
 
-            ax1.set_xlabel("Time")
-            st.pyplot(fig)
-        else:
-            st.warning("No timestamp data available for plotting")
+    # --- Gradient calculation ---
+    df["gradient"] = df["altitude"].diff() / df["distance"].diff() * 100
+    df["gradient"] = df["gradient"].replace([float("inf"), -float("inf")], None)
+    df["gradient"] = df["gradient"].clip(-20, 20)
+
+    # --- Preview ---
+    st.subheader("Data preview")
+    st.dataframe(df[["distance_km", "altitude", "power", "gradient"]].head(20))
+
+    # --- MAIN PLOT ---
+    st.subheader("Elevation + Power vs Distance")
+
+    fig, ax1 = plt.subplots()
+
+    # Elevation
+    ax1.plot(df["distance_km"], df["altitude"], label="Elevation")
+    ax1.set_xlabel("Distance (km)")
+    ax1.set_ylabel("Altitude (m)")
+
+    # Power (if available)
+    if df["power"].notna().any():
+        ax2 = ax1.twinx()
+        ax2.plot(df["distance_km"], df["power"], color="orange", label="Power")
+        ax2.set_ylabel("Power (W)")
+
+    st.pyplot(fig)
+
+    # --- Extra insight plot ---
+    st.subheader("Gradient profile")
+
+    fig2, ax = plt.subplots()
+    ax.plot(df["distance_km"], df["gradient"])
+    ax.set_xlabel("Distance (km)")
+    ax.set_ylabel("Gradient (%)")
+
+    st.pyplot(fig2)
+
+    # --- Summary stats ---
+    st.subheader("Quick stats")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Max Power", f"{df['power'].max():.0f} W" if df["power"].notna().any() else "N/A")
+    col2.metric("Max Gradient", f"{df['gradient'].max():.1f}%")
+    col3.metric("Distance", f"{df['distance_km'].max():.1f} km")
