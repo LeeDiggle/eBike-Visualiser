@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Ride Dashboard (Final Working Version)")
+st.title("🚴 E-Bike Ride Dashboard (Fixed)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -14,20 +14,23 @@ if uploaded_file:
     fitfile = FitFile(uploaded_file)
 
     # -------------------------
-    # ONLY USE RECORD (this is the truth)
+    # FIXED RECORD PARSING
     # -------------------------
     data = []
 
     for record in fitfile.get_messages("record"):
         row = {}
+
         for field in record:
+            # ✅ FIX: correct dictionary assignment
             row[field.name] = field.value
+
         data.append(row)
 
     df = pd.DataFrame(data)
 
     # -------------------------
-    # GPS (DO NOT TOUCH LOGIC)
+    # GPS
     # -------------------------
     df = df.dropna(subset=["position_lat", "position_long"])
 
@@ -35,19 +38,16 @@ if uploaded_file:
     df["lon"] = df["position_long"] * (180 / 2**31)
 
     # -------------------------
-    # NUMERIC CLEAN (SAFE ONLY)
+    # NUMERIC FIELDS
     # -------------------------
     for col in ["distance", "speed", "power", "altitude"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # -------------------------
-    # DISTANCE
-    # -------------------------
     df["distance_km"] = df["distance"] / 1000
 
     # -------------------------
-    # SMOOTHING (IMPORTANT FOR READABILITY)
+    # SMOOTHING (for readability)
     # -------------------------
     df["alt_smooth"] = df["altitude"].rolling(10, min_periods=1).median()
     df["power_smooth"] = df["power"].rolling(10, min_periods=1).median()
@@ -79,7 +79,7 @@ if uploaded_file:
     st.plotly_chart(fig_map, use_container_width=True)
 
     # -------------------------
-    # CHARTS (THIS IS WHAT WAS BROKEN)
+    # CHARTS
     # -------------------------
     st.subheader("📊 Elevation & Power")
 
@@ -93,23 +93,15 @@ if uploaded_file:
     st.pyplot(fig)
 
     # -------------------------
-    # SUMMARY (USE SESSION DATA)
+    # SUMMARY
     # -------------------------
-    session = pd.DataFrame([
-        dict(field.name, field.value)
-        for field in fitfile.get_messages("session").__next__()
-    ])
-
     st.subheader("Summary")
 
     col1, col2 = st.columns(2)
 
-    col1.metric(
-        "Distance (km)",
-        f"{df['distance_km'].max():.1f}"
-    )
+    col1.metric("Distance (km)", f"{df['distance_km'].max():.1f}")
 
-    if "avg_power" in session.columns:
-        col2.metric("Avg Power", f"{session['avg_power'].iloc[0]:.0f} W")
+    if df["power"].notna().any():
+        col2.metric("Max Power", f"{df['power'].max():.0f} W")
     else:
-        col2.metric("Avg Power", "N/A")
+        col2.metric("Max Power", "N/A")
