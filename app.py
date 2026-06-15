@@ -7,19 +7,18 @@ import numpy as np
 import folium
 from streamlit_folium import st_folium
 
-st.title("🚴 E-Bike Ride Visualiser (Stable + Working Map)")
+st.title("🚴 E-Bike Ride Visualiser (Stable Final Version)")
 
 uploaded_file = st.file_uploader("Upload your ride file")
 
 if uploaded_file:
 
-    # -----------------------
-    # Load FIT file
-    # -----------------------
+    # =======================
+    # LOAD FIT FILE
+    # =======================
     fitfile = FitFile(uploaded_file)
 
     data = []
-    gps_data = []
 
     for record in fitfile.get_messages("record"):
         row = {}
@@ -33,12 +32,9 @@ if uploaded_file:
 
     df = pd.DataFrame(data)
 
-    # also keep raw gps separately (IMPORTANT FIX)
-    gps_df = pd.DataFrame(data)
-
-    # -----------------------
-    # BASIC VALIDATION
-    # -----------------------
+    # =======================
+    # VALIDATION
+    # =======================
     if "distance" not in df.columns:
         st.error("No distance data found")
         st.stop()
@@ -46,37 +42,35 @@ if uploaded_file:
     df = df.sort_values("distance").reset_index(drop=True)
     df["distance_km"] = df["distance"] / 1000
 
-    # -----------------------
-    # NUMERIC CLEANUP
-    # -----------------------
+    # =======================
+    # CLEAN NUMERIC DATA
+    # =======================
     for col in ["altitude", "power", "speed"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # -----------------------
-    # POWER CLEANUP
-    # -----------------------
+    # Power cleanup
     if "power" in df.columns:
         df.loc[df["power"] <= 0, "power"] = np.nan
         df.loc[df["power"] > 1200, "power"] = np.nan
 
-    # -----------------------
-    # DOWNSAMPLE (for charts only)
-    # -----------------------
+    # =======================
+    # DOWN SAMPLE (charts only)
+    # =======================
     df = df.iloc[::3].reset_index(drop=True)
 
-    # -----------------------
+    # =======================
     # SMOOTHING
-    # -----------------------
+    # =======================
     if "altitude" in df.columns:
         df["altitude_smooth"] = df["altitude"].rolling(40, min_periods=1).median()
 
     if "power" in df.columns:
         df["power_smooth"] = df["power"].rolling(40, min_periods=1).median()
 
-    # -----------------------
+    # =======================
     # GRADIENT
-    # -----------------------
+    # =======================
     df["distance_diff"] = df["distance"].diff()
 
     if "altitude_smooth" in df.columns:
@@ -122,14 +116,20 @@ if uploaded_file:
     st.pyplot(fig2)
 
     # =======================
-    # MAP (FULLY STABLE FOLIUM)
+    # GPS MAP (FULLY FIXED)
     # =======================
     st.subheader("Route Map")
+
+    gps_df = pd.DataFrame(data)
 
     if "position_lat" in gps_df.columns and "position_long" in gps_df.columns:
 
         gps_df["lat"] = pd.to_numeric(gps_df["position_lat"], errors="coerce")
         gps_df["lon"] = pd.to_numeric(gps_df["position_long"], errors="coerce")
+
+        # IMPORTANT: clean + ORDER correctly
+        if "timestamp" in gps_df.columns:
+            gps_df = gps_df.sort_values("timestamp")
 
         gps_df = gps_df.dropna(subset=["lat", "lon"]).reset_index(drop=True)
 
