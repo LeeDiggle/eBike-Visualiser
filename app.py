@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Ride Dashboard (Stable Base)")
+st.title("🚴 E-Bike Ride Dashboard (Clean Reset)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -14,25 +14,25 @@ if uploaded_file:
     fitfile = FitFile(uploaded_file)
 
     data = []
+
     for record in fitfile.get_messages("record"):
         row = {}
+
         for field in record:
             row[field.name] = field.value
+
         data.append(row)
 
     df = pd.DataFrame(data)
 
-    st.write(df.columns.tolist())
-st.write(df[["power", "altitude", "speed", "distance"]].head(20))
-
     # -------------------------
-    # GPS (we know this works now)
+    # GPS (DO NOT TOUCH LOGIC)
     # -------------------------
     gps_lat = "position_lat"
     gps_lon = "position_long"
 
     if gps_lat not in df.columns or gps_lon not in df.columns:
-        st.error("GPS missing")
+        st.error("Missing GPS data")
         st.stop()
 
     df = df.dropna(subset=[gps_lat, gps_lon])
@@ -40,33 +40,38 @@ st.write(df[["power", "altitude", "speed", "distance"]].head(20))
     df["lat"] = df[gps_lat]
     df["lon"] = df[gps_lon]
 
-    # decode only if needed
     if df["lat"].abs().max() > 180:
         df["lat"] = df["lat"] * (180 / 2**31)
         df["lon"] = df["lon"] * (180 / 2**31)
 
     # -------------------------
-    # SAFE numeric extraction (IMPORTANT CHANGE)
+    # SAFE NUMERIC CONVERSION (ONLY REAL FIELDS)
     # -------------------------
-    def safe_col(col):
+    for col in ["distance", "speed", "power", "altitude"]:
         if col in df.columns:
-            return pd.to_numeric(df[col], errors="coerce")
-        return None
-
-    df["distance_km"] = safe_col("distance") / 1000 if "distance" in df.columns else range(len(df))
-    df["power"] = safe_col("power")
-    df["altitude"] = safe_col("altitude")
-    df["speed"] = safe_col("speed")
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # -------------------------
-    # KEEP ONLY VALID DATA (NO MASS DROPPING)
+    # DISTANCE
     # -------------------------
-    df = df.reset_index(drop=True)
+    if "distance" in df.columns:
+        df["distance_km"] = df["distance"] / 1000
+    else:
+        df["distance_km"] = range(len(df))
 
     # -------------------------
-    # MAP (unchanged, stable)
+    # SMOOTHING
     # -------------------------
-    st.subheader("🗺️ Ride Map")
+    if "altitude" in df.columns:
+        df["alt_smooth"] = df["altitude"].rolling(15, min_periods=1).median()
+
+    if "power" in df.columns:
+        df["power_smooth"] = df["power"].rolling(15, min_periods=1).median()
+
+    # -------------------------
+    # MAP
+    # -------------------------
+    st.subheader("🗺️ Route Map")
 
     fig_map = go.Figure()
 
@@ -90,30 +95,30 @@ st.write(df[["power", "altitude", "speed", "distance"]].head(20))
     st.plotly_chart(fig_map, use_container_width=True)
 
     # -------------------------
-    # CHARTS (ONLY IF DATA EXISTS)
+    # CHARTS
     # -------------------------
-    st.subheader("📊 Ride Data")
+    st.subheader("📊 Elevation & Power")
 
     fig, ax1 = plt.subplots()
 
     plotted = False
 
-    if df["altitude"].notna().any():
-        ax1.plot(df["distance_km"], df["altitude"], label="Altitude")
+    if "alt_smooth" in df.columns and df["alt_smooth"].notna().any():
+        ax1.plot(df["distance_km"], df["alt_smooth"])
         plotted = True
 
-    if df["power"].notna().any():
+    if "power_smooth" in df.columns and df["power_smooth"].notna().any():
         ax2 = ax1.twinx()
-        ax2.plot(df["distance_km"], df["power"], color="orange", label="Power")
+        ax2.plot(df["distance_km"], df["power_smooth"], color="orange")
         plotted = True
 
     if plotted:
         st.pyplot(fig)
     else:
-        st.warning("No altitude or power data available in this ride file")
+        st.warning("No usable altitude or power data in this file")
 
     # -------------------------
-    # SUMMARY (SAFE)
+    # SUMMARY
     # -------------------------
     st.subheader("Summary")
 
@@ -121,10 +126,10 @@ st.write(df[["power", "altitude", "speed", "distance"]].head(20))
 
     col1.metric(
         "Distance (km)",
-        f"{df['distance_km'].max():.1f}" if isinstance(df["distance_km"], pd.Series) else "N/A"
+        f"{df['distance_km'].max():.1f}" if "distance_km" in df.columns else "N/A"
     )
 
-    if df["power"].notna().any():
+    if "power" in df.columns and df["power"].notna().any():
         col2.metric("Max Power", f"{df['power'].max():.0f} W")
     else:
         col2.metric("Max Power", "N/A")
