@@ -5,15 +5,12 @@ import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Ride Intelligence Dashboard")
+st.title("🚴 E-Bike Ride Dashboard (Stable Version)")
 
-uploaded_file = st.file_uploader("Upload your FIT file")
+uploaded_file = st.file_uploader("Upload FIT file")
 
 if uploaded_file:
 
-    # -------------------------
-    # Load FIT file
-    # -------------------------
     fitfile = FitFile(uploaded_file)
 
     data = []
@@ -29,70 +26,69 @@ if uploaded_file:
 
     df = pd.DataFrame(data)
 
-    # -------------------------
-    # Validate GPS
-    # -------------------------
-    required_cols = ["position_lat", "position_long", "distance"]
-
-    for col in required_cols:
-        if col not in df.columns:
-            st.error(f"Missing required column: {col}")
-            st.stop()
+    st.subheader("Raw columns")
+    st.write(df.columns.tolist())
 
     # -------------------------
-    # Clean data
+    # HARD SAFETY CLEANING
     # -------------------------
-    df = df.dropna(subset=["position_lat", "position_long", "distance"])
-    df = df.sort_values("distance").reset_index(drop=True)
 
-    # Convert coordinates (FIT format → degrees)
-    df["lat"] = df["position_lat"] * (180 / 2**31)
-    df["lon"] = df["position_long"] * (180 / 2**31)
+    # Ensure numeric conversion
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors="ignore")
 
-    df["distance_km"] = df["distance"] / 1000
+    # Drop rows where GPS is missing
+    if "position_lat" in df.columns and "position_long" in df.columns:
+        df = df.dropna(subset=["position_lat", "position_long"])
 
-    # Numeric cleanup
+    if df.empty:
+        st.error("No GPS data available after cleaning")
+        st.stop()
+
+    # -------------------------
+    # Decode GPS (only if valid)
+    # -------------------------
+    if "position_lat" in df.columns:
+        df["lat"] = df["position_lat"].apply(
+            lambda x: x * (180 / 2**31) if pd.notnull(x) else np.nan
+        )
+
+    if "position_long" in df.columns:
+        df["lon"] = df["position_long"].apply(
+            lambda x: x * (180 / 2**31) if pd.notnull(x) else np.nan
+        )
+
+    # Remove invalid GPS rows
+    df = df.dropna(subset=["lat", "lon"])
+
+    # -------------------------
+    # Distance fallback safety
+    # -------------------------
+    if "distance" in df.columns:
+        df["distance_km"] = df["distance"] / 1000
+    else:
+        df["distance_km"] = range(len(df))
+
+    # -------------------------
+    # Clean numeric fields
+    # -------------------------
     for col in ["speed", "power", "altitude"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # -------------------------
-    # Smoothing (critical for readability)
+    # Basic smoothing
     # -------------------------
     if "altitude" in df.columns:
-        df["alt_smooth"] = df["altitude"].rolling(30, min_periods=1).median()
+        df["alt_smooth"] = df["altitude"].rolling(20, min_periods=1).median()
 
     if "power" in df.columns:
-        df["power_smooth"] = df["power"].rolling(30, min_periods=1).median()
-
-    if "speed" in df.columns:
-        df["speed_smooth"] = df["speed"].rolling(30, min_periods=1).median()
+        df["power_smooth"] = df["power"].rolling(20, min_periods=1).median()
 
     # -------------------------
-    # Gradient
-    # -------------------------
-    df["gradient"] = (
-        df["alt_smooth"].diff() / df["distance"].diff()
-    ) * 100
-
-    df["gradient"] = df["gradient"].replace([np.inf, -np.inf], np.nan)
-    df["gradient"] = df["gradient"].clip(-12, 12)
-    df["gradient"] = df["gradient"].rolling(15, min_periods=1).mean()
-
-    # -------------------------
-    # SIDEBAR INFO
-    # -------------------------
-    st.sidebar.subheader("Ride Summary")
-    st.sidebar.metric("Distance (km)", f"{df['distance_km'].max():.1f}")
-    st.sidebar.metric("Max Speed", f"{df['speed'].max():.1f}" if "speed" in df.columns else "N/A")
-    st.sidebar.metric("Max Power", f"{df['power'].max():.0f}" if "power" in df.columns else "N/A")
-
-    # -------------------------
-    # MAP (MAIN FEATURE)
+    # MAP (SAFE VERSION)
     # -------------------------
     st.subheader("🗺️ Ride Map")
-
-    color_metric = "speed_smooth" if "speed_smooth" in df.columns else "alt_smooth"
 
     fig_map = go.Figure()
 
@@ -102,28 +98,6 @@ if uploaded_file:
         mode="lines",
         line=dict(width=4, color="blue"),
         name="Route"
-    ))
-
-    fig_map.add_trace(go.Scattermapbox(
-        lat=df["lat"],
-        lon=df["lon"],
-        mode="markers",
-        marker=dict(
-            size=6,
-            color=df[color_metric],
-            colorscale="Turbo",
-            showscale=True,
-            colorbar=dict(title=color_metric)
-        ),
-        text=[
-            f"Speed: {s:.1f} | Power: {p:.0f} | Grad: {g:.1f}"
-            for s, p, g in zip(
-                df["speed"] if "speed" in df.columns else [0]*len(df),
-                df["power"] if "power" in df.columns else [0]*len(df),
-                df["gradient"]
-            )
-        ],
-        hoverinfo="text"
     ))
 
     fig_map.update_layout(
@@ -139,52 +113,31 @@ if uploaded_file:
     st.plotly_chart(fig_map, use_container_width=True)
 
     # -------------------------
-    # ELEVATION + POWER
+    # SIMPLE CHARTS
     # -------------------------
-    st.subheader("📈 Elevation vs Power")
+    st.subheader("Elevation / Power")
 
-    fig1 = go.Figure()
+    fig, ax1 = plt.subplots()
 
-    fig1.add_trace(go.Scatter(
-        x=df["distance_km"],
-        y=df["alt_smooth"],
-        name="Elevation",
-        line=dict(width=2)
-    ))
+    if "alt_smooth" in df.columns:
+        ax1.plot(df["distance_km"], df["alt_smooth"], label="Elevation")
 
     if "power_smooth" in df.columns:
-        fig1.add_trace(go.Scatter(
-            x=df["distance_km"],
-            y=df["power_smooth"],
-            name="Power",
-            yaxis="y2",
-            opacity=0.6
-        ))
+        ax2 = ax1.twinx()
+        ax2.plot(df["distance_km"], df["power_smooth"], color="orange")
 
-    fig1.update_layout(
-        yaxis=dict(title="Altitude (m)"),
-        yaxis2=dict(title="Power (W)", overlaying="y", side="right"),
-        xaxis=dict(title="Distance (km)")
-    )
-
-    st.plotly_chart(fig1, use_container_width=True)
+    st.pyplot(fig)
 
     # -------------------------
-    # GRADIENT
+    # METRICS (SAFE)
     # -------------------------
-    st.subheader("⛰️ Gradient Profile")
+    st.subheader("Summary")
 
-    fig2 = go.Figure()
+    col1, col2 = st.columns(2)
 
-    fig2.add_trace(go.Scatter(
-        x=df["distance_km"],
-        y=df["gradient"],
-        name="Gradient"
-    ))
+    col1.metric("Distance (km)", f"{df['distance_km'].max():.1f}")
 
-    fig2.update_layout(
-        xaxis_title="Distance (km)",
-        yaxis_title="Gradient (%)"
-    )
-
-    st.plotly_chart(fig2, use_container_width=True)
+    if "power" in df.columns:
+        col2.metric("Max Power", f"{np.nanmax(df['power']):.0f} W")
+    else:
+        col2.metric("Max Power", "N/A")
