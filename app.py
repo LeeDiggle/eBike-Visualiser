@@ -5,7 +5,7 @@ from fitparse import FitFile
 
 st.title("🚴 eBike Ride Dashboard")
 
-uploaded_file = st.file_uploader("Upload your FIT file", type=["fit"])
+uploaded_file = st.file_uploader("Upload your ride file")
 
 if uploaded_file:
     fitfile = FitFile(uploaded_file)
