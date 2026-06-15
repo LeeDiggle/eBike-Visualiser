@@ -1,69 +1,29 @@
 import streamlit as st
-import pandas as pd
-from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 FIT Ride Viewer (Clean Rebuild)")
+st.title("Map Isolation Test")
 
-uploaded_file = st.file_uploader("Upload FIT file")
+# fake route (Bristol-ish coordinates)
+lat = [51.4591, 51.4592, 51.4593, 51.4594, 51.4595]
+lon = [-2.593, -2.592, -2.591, -2.590, -2.589]
 
-if uploaded_file:
+fig = go.Figure()
 
-    fitfile = FitFile(uploaded_file)
+fig.add_trace(go.Scattermapbox(
+    lat=lat,
+    lon=lon,
+    mode="lines",
+    line=dict(width=4, color="blue")
+))
 
-    # -------------------------
-    # RAW RECORD EXTRACTION
-    # -------------------------
-    data = []
-    for record in fitfile.get_messages("record"):
-        row = {}
-        for field in record:
-            row[field.name] = field.value
-        data.append(row)
+fig.update_layout(
+    mapbox=dict(
+        style="open-street-map",
+        center=dict(lat=51.4593, lon=-2.5915),
+        zoom=13
+    ),
+    margin=dict(l=0, r=0, t=0, b=0),
+    height=600
+)
 
-    df = pd.DataFrame(data)
-
-    st.subheader("Data sanity check")
-    st.write("Rows:", len(df))
-    st.write("Columns:", df.columns.tolist())
-
-    # -------------------------
-    # CLEAN GPS (NO GUESSING)
-    # -------------------------
-    df = df.dropna(subset=["position_lat", "position_long"])
-
-    lat = pd.to_numeric(df["position_lat"], errors="coerce")
-    lon = pd.to_numeric(df["position_long"], errors="coerce")
-
-    mask = lat.notna() & lon.notna()
-
-    lat = lat[mask]
-    lon = lon[mask]
-
-    st.write("GPS points:", len(lat))
-
-    # -------------------------
-    # MAP (MINIMAL, ROBUST)
-    # -------------------------
-    fig = go.Figure()
-
-    fig.add_trace(go.Scattermapbox(
-        lat=lat.tolist(),
-        lon=lon.tolist(),
-        mode="lines"
-    ))
-
-    fig.update_layout(
-        mapbox=dict(
-            style="open-street-map",
-            center=dict(
-                lat=float(lat.mean()),
-                lon=float(lon.mean())
-            ),
-            zoom=12
-        ),
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=600
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True)
