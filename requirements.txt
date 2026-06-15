@@ -4,3 +4,5 @@ numpy
 matplotlib
 fitparse
 plotly
+folium
+streamlit-folium
