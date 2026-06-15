@@ -3,20 +3,24 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from fitparse import FitFile
 import numpy as np
-import pydeck as pdk
 
-st.title("🚴 E-Bike Ride Visualiser (Stable + Map Fixed)")
+import folium
+from streamlit_folium import st_folium
+
+st.title("🚴 E-Bike Ride Visualiser (Stable + Working Map)")
 
 uploaded_file = st.file_uploader("Upload your ride file")
 
 if uploaded_file:
 
     # -----------------------
-    # Load FIT file (records only)
+    # Load FIT file
     # -----------------------
     fitfile = FitFile(uploaded_file)
 
     data = []
+    gps_data = []
+
     for record in fitfile.get_messages("record"):
         row = {}
         for field in record:
@@ -29,10 +33,12 @@ if uploaded_file:
 
     df = pd.DataFrame(data)
 
+    # also keep raw gps separately (IMPORTANT FIX)
+    gps_df = pd.DataFrame(data)
+
     # -----------------------
-    # Basic validation
+    # BASIC VALIDATION
     # -----------------------
-    required_cols = ["distance"]
     if "distance" not in df.columns:
         st.error("No distance data found")
         st.stop()
@@ -41,26 +47,26 @@ if uploaded_file:
     df["distance_km"] = df["distance"] / 1000
 
     # -----------------------
-    # Numeric cleanup
+    # NUMERIC CLEANUP
     # -----------------------
     for col in ["altitude", "power", "speed"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # -----------------------
-    # Power cleanup
+    # POWER CLEANUP
     # -----------------------
     if "power" in df.columns:
         df.loc[df["power"] <= 0, "power"] = np.nan
         df.loc[df["power"] > 1200, "power"] = np.nan
 
     # -----------------------
-    # Downsample (keeps charts readable)
+    # DOWNSAMPLE (for charts only)
     # -----------------------
     df = df.iloc[::3].reset_index(drop=True)
 
     # -----------------------
-    # Smoothing
+    # SMOOTHING
     # -----------------------
     if "altitude" in df.columns:
         df["altitude_smooth"] = df["altitude"].rolling(40, min_periods=1).median()
@@ -69,7 +75,7 @@ if uploaded_file:
         df["power_smooth"] = df["power"].rolling(40, min_periods=1).median()
 
     # -----------------------
-    # Gradient
+    # GRADIENT
     # -----------------------
     df["distance_diff"] = df["distance"].diff()
 
@@ -98,7 +104,7 @@ if uploaded_file:
 
     if "power_smooth" in df.columns:
         ax2 = ax1.twinx()
-        ax2.plot(df["distance_km"], df["power_smooth"], color="orange", label="Power")
+        ax2.plot(df["distance_km"], df["power_smooth"], color="orange")
         ax2.set_ylabel("Power (W)")
 
     st.pyplot(fig)
@@ -116,16 +122,9 @@ if uploaded_file:
     st.pyplot(fig2)
 
     # =======================
-    # GPS (REBUILT FROM RAW FIT STREAM)
+    # MAP (FULLY STABLE FOLIUM)
     # =======================
-    gps_data = []
-    for record in fitfile.get_messages("record"):
-        row = {}
-        for field in record:
-            row[field.name] = field.value
-        gps_data.append(row)
-
-    gps_df = pd.DataFrame(gps_data)
+    st.subheader("Route Map")
 
     if "position_lat" in gps_df.columns and "position_long" in gps_df.columns:
 
@@ -134,35 +133,26 @@ if uploaded_file:
 
         gps_df = gps_df.dropna(subset=["lat", "lon"]).reset_index(drop=True)
 
-        st.subheader("Route Map")
-
         st.write("GPS points:", len(gps_df))
 
         if len(gps_df) > 1:
 
-            layer = pdk.Layer(
-                "PathLayer",
-                data=[{
-                    "path": list(zip(gps_df["lon"], gps_df["lat"]))
-                }],
-                get_path="path",
-                get_width=3,
-                get_color=[0, 0, 255],
-            )
+            center_lat = gps_df["lat"].iloc[0]
+            center_lon = gps_df["lon"].iloc[0]
 
-            view_state = pdk.ViewState(
-                latitude=float(gps_df["lat"].iloc[0]),
-                longitude=float(gps_df["lon"].iloc[0]),
-                zoom=12
-            )
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=13)
 
-            deck = pdk.Deck(
-                layers=[layer],
-                initial_view_state=view_state,
-                map_style="light"
-            )
+            folium.PolyLine(
+                list(zip(gps_df["lat"], gps_df["lon"])),
+                color="blue",
+                weight=4,
+                opacity=0.8
+            ).add_to(m)
 
-            st.pydeck_chart(deck)
+            st_folium(m, width=700, height=500)
+
+        else:
+            st.warning("Not enough GPS data")
 
     # =======================
     # SUMMARY
