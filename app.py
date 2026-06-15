@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Ride Dashboard (Stable Fixed)")
+st.title("🚴 E-Bike Ride Dashboard (Final Stable)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -30,10 +30,20 @@ if uploaded_file:
     st.write(df.columns.tolist())
 
     # -------------------------
-    # SAFE NUMERIC CONVERSION (FIXED)
+    # SAFE NUMERIC CONVERSION (FIXED PROPERLY)
     # -------------------------
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    numeric_cols = [
+        "position_lat",
+        "position_long",
+        "distance",
+        "speed",
+        "power",
+        "altitude"
+    ]
+
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # -------------------------
     # GPS CLEANING
@@ -44,13 +54,7 @@ if uploaded_file:
 
     df = df.dropna(subset=["position_lat", "position_long"])
 
-    if df.empty:
-        st.error("No valid GPS rows after cleaning")
-        st.stop()
-
-    # -------------------------
     # Decode GPS
-    # -------------------------
     df["lat"] = df["position_lat"] * (180 / 2**31)
     df["lon"] = df["position_long"] * (180 / 2**31)
 
@@ -65,7 +69,14 @@ if uploaded_file:
         df["distance_km"] = range(len(df))
 
     # -------------------------
-    # Smoothing
+    # CLEAN INVALID VALUES (IMPORTANT)
+    # -------------------------
+    for col in ["altitude", "power", "speed", "distance"]:
+        if col in df.columns:
+            df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+
+    # -------------------------
+    # SMOOTHING
     # -------------------------
     if "altitude" in df.columns:
         df["alt_smooth"] = df["altitude"].rolling(20, min_periods=1).median()
@@ -116,15 +127,18 @@ if uploaded_file:
     st.pyplot(fig)
 
     # -------------------------
-    # METRICS
+    # SAFE SUMMARY (FIXED)
     # -------------------------
     st.subheader("Summary")
 
     col1, col2 = st.columns(2)
 
-    col1.metric("Distance (km)", f"{df['distance_km'].max():.1f}")
+    col1.metric(
+        "Distance (km)",
+        f"{df['distance_km'].max():.1f}" if "distance_km" in df.columns else "N/A"
+    )
 
-    if "power" in df.columns:
-        col2.metric("Max Power", f"{np.nanmax(df['power']):.0f} W")
+    if "power" in df.columns and df["power"].notna().any():
+        col2.metric("Max Power", f"{df['power'].max():.0f} W")
     else:
         col2.metric("Max Power", "N/A")
