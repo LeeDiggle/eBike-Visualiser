@@ -3,7 +3,7 @@ import pandas as pd
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("FIT Debug - Truth Check")
+st.title("🚴 E-Bike FIT Viewer (Clean Base)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -20,70 +20,44 @@ if uploaded_file:
 
     df = pd.DataFrame(data)
 
-    st.subheader("1. Raw column check")
-    st.write(df.columns.tolist())
+    st.subheader("Data preview")
+    st.write(df.head())
 
-    st.subheader("2. Power / Altitude raw stats")
-    cols = ["power", "altitude", "speed", "distance"]
+    # -------------------------
+    # GPS CLEAN ONLY
+    # -------------------------
+    df = df.dropna(subset=["position_lat", "position_long"])
 
-    for c in cols:
-        if c in df.columns:
-            st.write(c, "non-null count:", df[c].notna().sum())
-            st.write(c, "sample:", df[c].dropna().head(10).tolist())
-        else:
-            st.write(c, "MISSING")
+    lat = pd.to_numeric(df["position_lat"], errors="coerce")
+    lon = pd.to_numeric(df["position_long"], errors="coerce")
 
-    st.subheader("3. GPS check")
+    mask = lat.notna() & lon.notna()
 
-    if "position_lat" in df.columns and "position_long" in df.columns:
-        st.write("GPS present:", True)
+    lat = lat[mask]
+    lon = lon[mask]
 
-        df = df.dropna(subset=["position_lat", "position_long"])
+    st.write("GPS points:", len(lat))
 
-        lat = df["position_lat"] * (180 / 2**31)
-        lon = df["position_long"] * (180 / 2**31)
+    # -------------------------
+    # MAP ONLY (NO CHARTS YET)
+    # -------------------------
+    fig = go.Figure()
 
-        st.write("lat sample:", lat.head(10).tolist())
-        st.write("lon sample:", lon.head(10).tolist())
+    fig.add_trace(go.Scattermapbox(
+        lat=lat.tolist(),
+        lon=lon.tolist(),
+        mode="lines",
+        line=dict(width=4, color="blue")
+    ))
 
-    st.subheader("🗺️ Route Map")
-
-# CLEAN SIMPLE GPS
-lat = pd.to_numeric(df["position_lat"], errors="coerce")
-lon = pd.to_numeric(df["position_long"], errors="coerce")
-
-mask = lat.notna() & lon.notna()
-
-lat = lat[mask]
-lon = lon[mask]
-
-st.write("GPS points:", len(lat))
-
-import plotly.graph_objects as go
-
-fig = go.Figure()
-
-fig.add_trace(go.Scattermapbox(
-    lat=lat.tolist(),
-    lon=lon.tolist(),
-    mode="lines",
-    line=dict(width=4, color="blue")
-))
-
-fig.update_layout(
-    mapbox=dict(
-        style="open-street-map",
-        center=dict(
-            lat=float(lat.mean()),
-            lon=float(lon.mean())
+    fig.update_layout(
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(lat=float(lat.mean()), lon=float(lon.mean())),
+            zoom=12
         ),
-        zoom=12
-    ),
-    margin=dict(l=0, r=0, t=0, b=0),
-    height=600
-)
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=600
+    )
 
-st.plotly_chart(fig, use_container_width=True)
-
-    else:
-        st.error("No GPS found")
+    st.plotly_chart(fig, use_container_width=True)
