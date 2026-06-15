@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Debug Dashboard (FIT Inspector)")
+st.title("🚴 E-Bike Ride Dashboard (Stable Base)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -13,84 +13,55 @@ if uploaded_file:
 
     fitfile = FitFile(uploaded_file)
 
-    raw_records = []
-    all_fields = set()
-
-    # -------------------------
-    # RAW EXTRACTION (NO FILTERING)
-    # -------------------------
+    data = []
     for record in fitfile.get_messages("record"):
         row = {}
-
         for field in record:
             row[field.name] = field.value
-            all_fields.add(field.name)
+        data.append(row)
 
-        raw_records.append(row)
-
-    df = pd.DataFrame(raw_records)
-
-    st.subheader("ALL AVAILABLE FIT FIELDS")
-    st.write(sorted(list(all_fields)))
-
-    st.subheader("Raw Data Sample")
-    st.dataframe(df.head(20))
+    df = pd.DataFrame(data)
 
     # -------------------------
-    # TRY ALL POSSIBLE GPS FIELD NAMES
+    # GPS (we know this works now)
     # -------------------------
-    gps_lat_candidates = [
-        "position_lat",
-        "position_latitude",
-        "enhanced_position_lat",
-        "lat"
-    ]
+    gps_lat = "position_lat"
+    gps_lon = "position_long"
 
-    gps_lon_candidates = [
-        "position_long",
-        "position_longitude",
-        "enhanced_position_long",
-        "lon"
-    ]
-
-    lat_col = next((c for c in gps_lat_candidates if c in df.columns), None)
-    lon_col = next((c for c in gps_lon_candidates if c in df.columns), None)
-
-    if not lat_col or not lon_col:
-        st.error("No GPS columns found in FIT file")
+    if gps_lat not in df.columns or gps_lon not in df.columns:
+        st.error("GPS missing")
         st.stop()
 
-    st.success(f"Using GPS columns: {lat_col} / {lon_col}")
+    df = df.dropna(subset=[gps_lat, gps_lon])
 
-    df = df.dropna(subset=[lat_col, lon_col])
+    df["lat"] = df[gps_lat]
+    df["lon"] = df[gps_lon]
 
-    # -------------------------
-    # GPS decode (only if needed)
-    # -------------------------
-    if df[lat_col].abs().max() > 180:
-        df["lat"] = df[lat_col] * (180 / 2**31)
-        df["lon"] = df[lon_col] * (180 / 2**31)
-    else:
-        df["lat"] = df[lat_col]
-        df["lon"] = df[lon_col]
+    # decode only if needed
+    if df["lat"].abs().max() > 180:
+        df["lat"] = df["lat"] * (180 / 2**31)
+        df["lon"] = df["lon"] * (180 / 2**31)
 
     # -------------------------
-    # Distance
+    # SAFE numeric extraction (IMPORTANT CHANGE)
     # -------------------------
-    if "distance" in df.columns:
-        df["distance_km"] = pd.to_numeric(df["distance"], errors="coerce") / 1000
-    else:
-        df["distance_km"] = range(len(df))
-
-    # -------------------------
-    # Clean numeric fields safely
-    # -------------------------
-    for col in ["speed", "power", "altitude"]:
+    def safe_col(col):
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            return pd.to_numeric(df[col], errors="coerce")
+        return None
+
+    df["distance_km"] = safe_col("distance") / 1000 if "distance" in df.columns else range(len(df))
+    df["power"] = safe_col("power")
+    df["altitude"] = safe_col("altitude")
+    df["speed"] = safe_col("speed")
 
     # -------------------------
-    # MAP
+    # KEEP ONLY VALID DATA (NO MASS DROPPING)
+    # -------------------------
+    df = df.reset_index(drop=True)
+
+    # -------------------------
+    # MAP (unchanged, stable)
     # -------------------------
     st.subheader("🗺️ Ride Map")
 
@@ -114,3 +85,43 @@ if uploaded_file:
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
+
+    # -------------------------
+    # CHARTS (ONLY IF DATA EXISTS)
+    # -------------------------
+    st.subheader("📊 Ride Data")
+
+    fig, ax1 = plt.subplots()
+
+    plotted = False
+
+    if df["altitude"].notna().any():
+        ax1.plot(df["distance_km"], df["altitude"], label="Altitude")
+        plotted = True
+
+    if df["power"].notna().any():
+        ax2 = ax1.twinx()
+        ax2.plot(df["distance_km"], df["power"], color="orange", label="Power")
+        plotted = True
+
+    if plotted:
+        st.pyplot(fig)
+    else:
+        st.warning("No altitude or power data available in this ride file")
+
+    # -------------------------
+    # SUMMARY (SAFE)
+    # -------------------------
+    st.subheader("Summary")
+
+    col1, col2 = st.columns(2)
+
+    col1.metric(
+        "Distance (km)",
+        f"{df['distance_km'].max():.1f}" if isinstance(df["distance_km"], pd.Series) else "N/A"
+    )
+
+    if df["power"].notna().any():
+        col2.metric("Max Power", f"{df['power'].max():.0f} W")
+    else:
+        col2.metric("Max Power", "N/A")
