@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Ride Dashboard (Final)")
+st.title("🚴 E-Bike Ride Dashboard (Robust FIT Parser)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -13,76 +13,79 @@ if uploaded_file:
 
     fitfile = FitFile(uploaded_file)
 
-    data = []
+    # -------------------------
+    # STRICT FIELD EXTRACTION
+    # -------------------------
+    records = []
+
     for record in fitfile.get_messages("record"):
-        row = {}
+        data = {
+            "distance": None,
+            "speed": None,
+            "power": None,
+            "altitude": None,
+            "lat": None,
+            "lon": None
+        }
+
         for field in record:
-            row[field.name] = field.value
-        data.append(row)
+            name = field.name
+            value = field.value
 
-    if not data:
-        st.error("No data found in file")
+            if name in data:
+                data[name] = value
+
+        records.append(data)
+
+    df = pd.DataFrame(records)
+
+    st.subheader("Raw data check")
+    st.write(df.head())
+
+    # -------------------------
+    # CLEAN DATA
+    # -------------------------
+    df = df.dropna(subset=["lat", "lon"], how="any")
+
+    if df.empty:
+        st.error("No GPS data found after cleaning")
         st.stop()
 
-    df = pd.DataFrame(data)
-
-    st.subheader("Raw columns")
-    st.write(df.columns.tolist())
+    # -------------------------
+    # CONVERT GPS IF NEEDED
+    # -------------------------
+    # Sometimes FIT already gives degrees, sometimes scaled
+    if df["lat"].abs().max() > 180:
+        df["lat"] = df["lat"] * (180 / 2**31)
+        df["lon"] = df["lon"] * (180 / 2**31)
 
     # -------------------------
-    # SAFE NUMERIC CONVERSION (FIXED PROPERLY)
+    # DISTANCE
     # -------------------------
-    numeric_cols = [
-        "position_lat",
-        "position_long",
-        "distance",
-        "speed",
-        "power",
-        "altitude"
-    ]
-
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # -------------------------
-    # GPS CLEANING
-    # -------------------------
-    if "position_lat" not in df.columns or "position_long" not in df.columns:
-        st.error("No GPS data found")
-        st.stop()
-
-    df = df.dropna(subset=["position_lat", "position_long"])
-
-    # Decode GPS
-    df["lat"] = df["position_lat"] * (180 / 2**31)
-    df["lon"] = df["position_long"] * (180 / 2**31)
-
-    df = df.dropna(subset=["lat", "lon"])
-
-    # -------------------------
-    # Distance
-    # -------------------------
-    if "distance" in df.columns:
-        df["distance_km"] = df["distance"] / 1000
+    if df["distance"].notna().any():
+        df["distance_km"] = pd.to_numeric(df["distance"], errors="coerce") / 1000
     else:
         df["distance_km"] = range(len(df))
 
     # -------------------------
-    # CLEAN INVALID VALUES (IMPORTANT)
+    # NUMERIC CLEAN
     # -------------------------
-    for col in ["altitude", "power", "speed", "distance"]:
-        if col in df.columns:
-            df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+    for col in ["speed", "power", "altitude"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # -------------------------
+    # REMOVE EMPTY SIGNAL BLOCKS
+    # -------------------------
+    df = df.dropna(subset=["lat", "lon"], how="any")
 
     # -------------------------
     # SMOOTHING
     # -------------------------
-    if "altitude" in df.columns:
-        df["alt_smooth"] = df["altitude"].rolling(20, min_periods=1).median()
+    if df["altitude"].notna().any():
+        df["alt_smooth"] = df["altitude"].rolling(15, min_periods=1).median()
 
-    if "power" in df.columns:
-        df["power_smooth"] = df["power"].rolling(20, min_periods=1).median()
+    if df["power"].notna().any():
+        df["power_smooth"] = df["power"].rolling(15, min_periods=1).median()
 
     # -------------------------
     # MAP
@@ -117,28 +120,25 @@ if uploaded_file:
 
     fig, ax1 = plt.subplots()
 
-    if "alt_smooth" in df.columns:
+    if df["alt_smooth"].notna().any():
         ax1.plot(df["distance_km"], df["alt_smooth"])
 
-    if "power_smooth" in df.columns:
+    if "power_smooth" in df.columns and df["power_smooth"].notna().any():
         ax2 = ax1.twinx()
         ax2.plot(df["distance_km"], df["power_smooth"], color="orange")
 
     st.pyplot(fig)
 
     # -------------------------
-    # SAFE SUMMARY (FIXED)
+    # SUMMARY
     # -------------------------
     st.subheader("Summary")
 
     col1, col2 = st.columns(2)
 
-    col1.metric(
-        "Distance (km)",
-        f"{df['distance_km'].max():.1f}" if "distance_km" in df.columns else "N/A"
-    )
+    col1.metric("Distance (km)", f"{df['distance_km'].max():.1f}")
 
-    if "power" in df.columns and df["power"].notna().any():
+    if df["power"].notna().any():
         col2.metric("Max Power", f"{df['power'].max():.0f} W")
     else:
         col2.metric("Max Power", "N/A")
