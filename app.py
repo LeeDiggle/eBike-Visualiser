@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike Ride Dashboard (Stable Version)")
+st.title("🚴 E-Bike Ride Dashboard (Stable Fixed)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -30,39 +30,34 @@ if uploaded_file:
     st.write(df.columns.tolist())
 
     # -------------------------
-    # HARD SAFETY CLEANING
+    # SAFE NUMERIC CONVERSION (FIXED)
     # -------------------------
-
-    # Ensure numeric conversion
     for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="ignore")
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Drop rows where GPS is missing
-    if "position_lat" in df.columns and "position_long" in df.columns:
-        df = df.dropna(subset=["position_lat", "position_long"])
+    # -------------------------
+    # GPS CLEANING
+    # -------------------------
+    if "position_lat" not in df.columns or "position_long" not in df.columns:
+        st.error("No GPS data found")
+        st.stop()
+
+    df = df.dropna(subset=["position_lat", "position_long"])
 
     if df.empty:
-        st.error("No GPS data available after cleaning")
+        st.error("No valid GPS rows after cleaning")
         st.stop()
 
     # -------------------------
-    # Decode GPS (only if valid)
+    # Decode GPS
     # -------------------------
-    if "position_lat" in df.columns:
-        df["lat"] = df["position_lat"].apply(
-            lambda x: x * (180 / 2**31) if pd.notnull(x) else np.nan
-        )
+    df["lat"] = df["position_lat"] * (180 / 2**31)
+    df["lon"] = df["position_long"] * (180 / 2**31)
 
-    if "position_long" in df.columns:
-        df["lon"] = df["position_long"].apply(
-            lambda x: x * (180 / 2**31) if pd.notnull(x) else np.nan
-        )
-
-    # Remove invalid GPS rows
     df = df.dropna(subset=["lat", "lon"])
 
     # -------------------------
-    # Distance fallback safety
+    # Distance
     # -------------------------
     if "distance" in df.columns:
         df["distance_km"] = df["distance"] / 1000
@@ -70,14 +65,7 @@ if uploaded_file:
         df["distance_km"] = range(len(df))
 
     # -------------------------
-    # Clean numeric fields
-    # -------------------------
-    for col in ["speed", "power", "altitude"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # -------------------------
-    # Basic smoothing
+    # Smoothing
     # -------------------------
     if "altitude" in df.columns:
         df["alt_smooth"] = df["altitude"].rolling(20, min_periods=1).median()
@@ -86,7 +74,7 @@ if uploaded_file:
         df["power_smooth"] = df["power"].rolling(20, min_periods=1).median()
 
     # -------------------------
-    # MAP (SAFE VERSION)
+    # MAP
     # -------------------------
     st.subheader("🗺️ Ride Map")
 
@@ -96,8 +84,7 @@ if uploaded_file:
         lat=df["lat"],
         lon=df["lon"],
         mode="lines",
-        line=dict(width=4, color="blue"),
-        name="Route"
+        line=dict(width=4, color="blue")
     ))
 
     fig_map.update_layout(
@@ -113,14 +100,14 @@ if uploaded_file:
     st.plotly_chart(fig_map, use_container_width=True)
 
     # -------------------------
-    # SIMPLE CHARTS
+    # CHARTS
     # -------------------------
     st.subheader("Elevation / Power")
 
     fig, ax1 = plt.subplots()
 
     if "alt_smooth" in df.columns:
-        ax1.plot(df["distance_km"], df["alt_smooth"], label="Elevation")
+        ax1.plot(df["distance_km"], df["alt_smooth"])
 
     if "power_smooth" in df.columns:
         ax2 = ax1.twinx()
@@ -129,7 +116,7 @@ if uploaded_file:
     st.pyplot(fig)
 
     # -------------------------
-    # METRICS (SAFE)
+    # METRICS
     # -------------------------
     st.subheader("Summary")
 
