@@ -3,7 +3,7 @@ import pandas as pd
 from fitparse import FitFile
 import plotly.graph_objects as go
 
-st.title("🚴 E-Bike FIT Viewer (Clean Base)")
+st.title("🚴 FIT Ride Viewer (Clean Rebuild)")
 
 uploaded_file = st.file_uploader("Upload FIT file")
 
@@ -11,6 +11,9 @@ if uploaded_file:
 
     fitfile = FitFile(uploaded_file)
 
+    # -------------------------
+    # RAW RECORD EXTRACTION
+    # -------------------------
     data = []
     for record in fitfile.get_messages("record"):
         row = {}
@@ -20,11 +23,12 @@ if uploaded_file:
 
     df = pd.DataFrame(data)
 
-    st.subheader("Data preview")
-    st.write(df.head())
+    st.subheader("Data sanity check")
+    st.write("Rows:", len(df))
+    st.write("Columns:", df.columns.tolist())
 
     # -------------------------
-    # GPS CLEAN ONLY
+    # CLEAN GPS (NO GUESSING)
     # -------------------------
     df = df.dropna(subset=["position_lat", "position_long"])
 
@@ -39,21 +43,23 @@ if uploaded_file:
     st.write("GPS points:", len(lat))
 
     # -------------------------
-    # MAP ONLY (NO CHARTS YET)
+    # MAP (MINIMAL, ROBUST)
     # -------------------------
     fig = go.Figure()
 
     fig.add_trace(go.Scattermapbox(
         lat=lat.tolist(),
         lon=lon.tolist(),
-        mode="lines",
-        line=dict(width=4, color="blue")
+        mode="lines"
     ))
 
     fig.update_layout(
         mapbox=dict(
             style="open-street-map",
-            center=dict(lat=float(lat.mean()), lon=float(lon.mean())),
+            center=dict(
+                lat=float(lat.mean()),
+                lon=float(lon.mean())
+            ),
             zoom=12
         ),
         margin=dict(l=0, r=0, t=0, b=0),
