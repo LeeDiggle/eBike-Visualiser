@@ -6,7 +6,7 @@ import numpy as np
 import folium
 from streamlit_folium import st_folium
 
-st.title("🚴 E-Bike Ride Visualiser (Final Stable)")
+st.title("🚴 E-Bike Ride Visualiser (Stable)")
 
 uploaded_file = st.file_uploader("Upload your ride file")
 
