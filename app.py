@@ -4,30 +4,27 @@ import folium
 from streamlit_folium import st_folium
 from fitparse import FitFile
 
-# =======================
-# PAGE SETUP
-# =======================
 st.set_page_config(layout="wide")
 st.title("🚴 eBike Ride Visualiser")
 
 # =======================
-# RESET BUTTON
+# RESET
 # =======================
 if st.button("🔄 Reset App"):
     st.session_state.clear()
     st.rerun()
 
 # =======================
-# FILE UPLOADER (FIXED)
+# UPLOADER (STABLE)
 # =======================
 uploaded_file = st.file_uploader(
     "Upload your FIT file",
     type=None,
-    key="fit_upload_v4"
+    key="fit_upload_stable"
 )
 
 # =======================
-# MAIN
+# PROCESS FILE
 # =======================
 if uploaded_file:
 
@@ -44,32 +41,57 @@ if uploaded_file:
 
     st.write("Records:", len(df))
 
+    if df.empty:
+        st.error("No data found in FIT file")
+        st.stop()
+
     # =======================
-    # METRICS (RESTORED)
+    # CLEAN DATA
     # =======================
+    df = df.reset_index(drop=True)
+
+    # =======================
+    # METRICS
+    # =======================
+    st.subheader("📊 Ride Summary")
+
     col1, col2, col3 = st.columns(3)
 
     if "distance" in df.columns:
         distance_km = df["distance"].max() / 1000
         col1.metric("Distance (km)", f"{distance_km:.2f}")
+    else:
+        col1.metric("Distance", "N/A")
 
     if "power" in df.columns:
         avg_power = df["power"].mean()
         col2.metric("Avg Power (W)", f"{avg_power:.0f}")
+        col3.metric("Max Power (W)", f"{df['power'].max():.0f}")
+    else:
+        col2.metric("Avg Power", "N/A")
+        col3.metric("Max Power", "N/A")
+
+    # =======================
+    # CHARTS (FIXED)
+    # =======================
+    st.subheader("📈 Charts")
 
     if "power" in df.columns:
-        max_power = df["power"].max()
-        col3.metric("Max Power (W)", f"{max_power:.0f}")
+        power_df = df[["power"]].dropna().reset_index()
+        power_df.columns = ["Time", "Power"]
+
+        st.line_chart(power_df, x="Time", y="Power")
+    else:
+        st.info("No power data available")
+
+    if "altitude" in df.columns:
+        alt_df = df[["altitude"]].dropna().reset_index()
+        alt_df.columns = ["Time", "Altitude"]
+
+        st.line_chart(alt_df, x="Time", y="Altitude")
 
     # =======================
-    # CHART (RESTORED)
-    # =======================
-    if "power" in df.columns:
-        st.subheader("Power Over Time")
-        st.line_chart(df["power"])
-
-    # =======================
-    # GPS FIX
+    # GPS CONVERSION (CORRECT)
     # =======================
     gps_points = []
 
@@ -79,12 +101,13 @@ if uploaded_file:
         df["lon"] = pd.to_numeric(df["position_long"], errors="coerce") * (180 / 2**31)
 
         gps_df = df[["lat", "lon"]].dropna()
+
         gps_points = list(zip(gps_df["lat"], gps_df["lon"]))
 
     st.write("GPS points:", len(gps_points))
 
     # =======================
-    # MAP
+    # MAP (ISOLATED - WON’T BREAK OTHER STUFF)
     # =======================
     st.subheader("🗺️ Route Map")
 
@@ -99,13 +122,14 @@ if uploaded_file:
         folium.PolyLine(
             gps_points,
             color="blue",
-            weight=4
+            weight=4,
+            opacity=0.8
         ).add_to(m)
 
         st_folium(m, width=900, height=500)
 
     else:
-        st.warning("No GPS data")
+        st.warning("No valid GPS data")
 
 else:
     st.info("Upload a FIT file to begin")
