@@ -3,8 +3,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from fitparse import FitFile
 import numpy as np
+import folium
+from streamlit_folium import st_folium
 
-st.title("🚴 E-Bike Ride Visualiser (Tile-Free Stable Version)")
+st.title("🚴 E-Bike Ride Visualiser")
 
 uploaded_file = st.file_uploader("Upload your ride file")
 
@@ -12,13 +14,15 @@ if uploaded_file:
 
     fitfile = FitFile(uploaded_file)
 
-    data = []
+    records = []
     gps_points = []
 
+    # =======================
+    # EXTRACT DATA
+    # =======================
     for record in fitfile.get_messages("record"):
 
         row = {}
-
         lat = None
         lon = None
 
@@ -30,17 +34,21 @@ if uploaded_file:
             if field.name == "position_long":
                 lon = field.value
 
-        data.append(row)
+        records.append(row)
 
+        # ONLY store valid paired GPS points
         if lat is not None and lon is not None:
             gps_points.append((lat, lon))
 
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(records)
 
     if "distance" not in df.columns:
         st.error("No distance data found")
         st.stop()
 
+    # =======================
+    # CLEAN DATA
+    # =======================
     df = df.sort_values("distance").reset_index(drop=True)
     df["distance_km"] = df["distance"] / 1000
 
@@ -48,28 +56,37 @@ if uploaded_file:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # clean power
     if "power" in df.columns:
         df.loc[df["power"] <= 0, "power"] = np.nan
         df.loc[df["power"] > 1200, "power"] = np.nan
 
+    # downsample (charts only)
     df = df.iloc[::3].reset_index(drop=True)
 
+    # smoothing
     if "altitude" in df.columns:
         df["altitude_smooth"] = df["altitude"].rolling(40, min_periods=1).median()
 
     if "power" in df.columns:
         df["power_smooth"] = df["power"].rolling(40, min_periods=1).median()
 
+    # gradient
     df["distance_diff"] = df["distance"].diff()
-    df["alt_diff"] = df["altitude"].diff() if "altitude" in df.columns else np.nan
+
+    if "altitude" in df.columns:
+        df["alt_diff"] = df["altitude"].diff()
+    else:
+        df["alt_diff"] = np.nan
 
     df["gradient"] = (df["alt_diff"] / df["distance_diff"]) * 100
     df["gradient"] = df["gradient"].replace([np.inf, -np.inf], np.nan)
     df["gradient"] = df["gradient"].clip(-12, 12)
+    df["gradient"] = df["gradient"].rolling(20, min_periods=1).mean()
 
-    # -----------------------
+    # =======================
     # CHARTS
-    # -----------------------
+    # =======================
     st.subheader("Elevation + Power")
 
     fig, ax1 = plt.subplots(figsize=(12, 5))
@@ -81,42 +98,58 @@ if uploaded_file:
         ax2 = ax1.twinx()
         ax2.plot(df["distance_km"], df["power_smooth"], color="orange")
 
+    ax1.set_xlabel("Distance (km)")
+    ax1.set_ylabel("Altitude (m)")
+
     st.pyplot(fig)
 
-    # -----------------------
+    # =======================
     # GRADIENT
-    # -----------------------
+    # =======================
     st.subheader("Gradient")
 
     fig2, ax = plt.subplots(figsize=(12, 3))
     ax.plot(df["distance_km"], df["gradient"])
+    ax.set_xlabel("Distance (km)")
+    ax.set_ylabel("Gradient (%)")
+
     st.pyplot(fig2)
 
-    # -----------------------
-    # STATIC MAP (NO TILES)
-    # -----------------------
-    st.subheader("Route Map (Stable Mode)")
+    # =======================
+    # MAP (CARTODB TILE FIX)
+    # =======================
+    st.subheader("Route Map")
 
     st.write("GPS points:", len(gps_points))
 
     if len(gps_points) > 1:
 
-        import matplotlib.pyplot as plt
+        lat_lon = [(float(lat), float(lon)) for lat, lon in gps_points]
 
-        lats = [p[0] for p in gps_points]
-        lons = [p[1] for p in gps_points]
+        center_lat = lat_lon[0][0]
+        center_lon = lat_lon[0][1]
 
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.plot(lons, lats, linewidth=2)
-        ax.set_xlabel("Longitude")
-        ax.set_ylabel("Latitude")
-        ax.set_title("Route Geometry (No Map Tiles)")
+        m = folium.Map(
+            location=[center_lat, center_lon],
+            zoom_start=13,
+            tiles="CartoDB positron"
+        )
 
-        st.pyplot(fig)
+        folium.PolyLine(
+            lat_lon,
+            color="blue",
+            weight=4,
+            opacity=0.8
+        ).add_to(m)
 
-    # -----------------------
+        st_folium(m, width=700, height=500)
+
+    else:
+        st.warning("Not enough GPS data")
+
+    # =======================
     # SUMMARY
-    # -----------------------
+    # =======================
     st.subheader("Summary")
 
     col1, col2, col3 = st.columns(3)
