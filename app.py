@@ -8,23 +8,23 @@ st.set_page_config(layout="wide")
 st.title("🚴 eBike Ride Visualiser")
 
 # =======================
-# RESET
+# RESET BUTTON
 # =======================
 if st.button("🔄 Reset App"):
     st.session_state.clear()
     st.rerun()
 
 # =======================
-# UPLOADER (STABLE)
+# FILE UPLOADER
 # =======================
 uploaded_file = st.file_uploader(
     "Upload your FIT file",
     type=None,
-    key="fit_upload_stable"
+    key="fit_upload_final"
 )
 
 # =======================
-# PROCESS FILE
+# MAIN PROCESS
 # =======================
 if uploaded_file:
 
@@ -39,16 +39,13 @@ if uploaded_file:
 
     df = pd.DataFrame(records)
 
-    st.write("Records:", len(df))
-
     if df.empty:
         st.error("No data found in FIT file")
         st.stop()
 
-    # =======================
-    # CLEAN DATA
-    # =======================
     df = df.reset_index(drop=True)
+
+    st.write("Records:", len(df))
 
     # =======================
     # METRICS
@@ -72,27 +69,48 @@ if uploaded_file:
         col3.metric("Max Power", "N/A")
 
     # =======================
-    # CHARTS (FIXED)
+    # CHART (SMOOTH + OVERLAY)
     # =======================
-    st.subheader("📈 Charts")
+    st.subheader("📈 Power & Altitude")
+
+    chart_df = pd.DataFrame()
 
     if "power" in df.columns:
-        power_df = df[["power"]].dropna().reset_index()
-        power_df.columns = ["Time", "Power"]
-
-        st.line_chart(power_df, x="Time", y="Power")
-    else:
-        st.info("No power data available")
+        chart_df["Power"] = df["power"]
 
     if "altitude" in df.columns:
-        alt_df = df[["altitude"]].dropna().reset_index()
-        alt_df.columns = ["Time", "Altitude"]
+        chart_df["Altitude"] = df["altitude"]
 
-        st.line_chart(alt_df, x="Time", y="Altitude")
+    chart_df = chart_df.dropna(how="all").reset_index()
+
+    if not chart_df.empty:
+
+        # Smooth power (reduces spikes)
+        if "Power" in chart_df.columns:
+            chart_df["Power Smooth"] = chart_df["Power"].rolling(
+                window=10, min_periods=1
+            ).mean()
+
+        chart_df = chart_df.rename(columns={"index": "Time"})
+
+        plot_cols = []
+
+        if "Power Smooth" in chart_df.columns:
+            plot_cols.append("Power Smooth")
+
+        if "Altitude" in chart_df.columns:
+            plot_cols.append("Altitude")
+
+        st.line_chart(chart_df, x="Time", y=plot_cols)
+
+    else:
+        st.warning("No chart data available")
 
     # =======================
-    # GPS CONVERSION (CORRECT)
+    # GPS + MAP
     # =======================
+    st.subheader("🗺️ Route Map")
+
     gps_points = []
 
     if "position_lat" in df.columns and "position_long" in df.columns:
@@ -105,11 +123,6 @@ if uploaded_file:
         gps_points = list(zip(gps_df["lat"], gps_df["lon"]))
 
     st.write("GPS points:", len(gps_points))
-
-    # =======================
-    # MAP (ISOLATED - WON’T BREAK OTHER STUFF)
-    # =======================
-    st.subheader("🗺️ Route Map")
 
     if len(gps_points) > 1:
 
