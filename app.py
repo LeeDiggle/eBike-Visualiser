@@ -21,26 +21,18 @@ if st.button("🔄 Reset App"):
 col1, col2 = st.columns(2)
 
 with col1:
-    bosch_file = st.file_uploader(
-        "Upload Bosch Flow FIT file",
-        type=None,
-        key="bosch_fit"
-    )
+    flow_file = st.file_uploader("Upload Bosch Flow FIT file", type=None)
 
 with col2:
-    strava_file = st.file_uploader(
-        "Upload Strava FIT file (Heart Rate)",
-        type=None,
-        key="strava_fit"
-    )
+    hr_file = st.file_uploader("Upload Strava HR FIT file", type=None)
 
 # =======================
-# FIT → DATAFRAME FUNCTION
+# FUNCTION TO PARSE FIT
 # =======================
-def fit_to_df(uploaded_file):
-    fitfile = FitFile(uploaded_file)
-
+def parse_fit(file):
+    fitfile = FitFile(file)
     records = []
+
     for record in fitfile.get_messages("record"):
         row = {}
         for field in record:
@@ -49,55 +41,42 @@ def fit_to_df(uploaded_file):
 
     df = pd.DataFrame(records)
 
-    if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
+    if not df.empty:
+        df = df.reset_index(drop=True)
 
     return df
-
 
 # =======================
 # MAIN PROCESS
 # =======================
-if bosch_file:
+if flow_file:
 
-    bosch_df = fit_to_df(bosch_file)
+    df = parse_fit(flow_file)
 
-    if bosch_df.empty:
-        st.error("No data in Bosch FIT file")
+    if df.empty:
+        st.error("No data found in Flow FIT file")
         st.stop()
 
-    df = bosch_df.copy()
+    st.write("Flow records:", len(df))
 
     # =======================
-    # MERGE HEART RATE
+    # MERGE HEART RATE FILE
     # =======================
-    if strava_file:
+    if hr_file:
+        hr_df = parse_fit(hr_file)
 
-        strava_df = fit_to_df(strava_file)
+        if "heart_rate" in hr_df.columns:
+            hr_df = hr_df[["heart_rate"]].reset_index(drop=True)
 
-        if "heart_rate" in strava_df.columns:
+            min_len = min(len(df), len(hr_df))
+            df = df.iloc[:min_len].copy()
+            hr_df = hr_df.iloc[:min_len].copy()
 
-            hr_df = strava_df[["timestamp", "heart_rate"]].dropna()
+            df["Heart Rate"] = hr_df["heart_rate"]
 
-            df = df.sort_values("timestamp")
-            hr_df = hr_df.sort_values("timestamp")
-
-            df = pd.merge_asof(
-                df,
-                hr_df,
-                on="timestamp",
-                direction="nearest",
-                tolerance=pd.Timedelta("3s")
-            )
-
-            st.success("✅ Heart rate merged successfully")
-
+            st.success("Heart rate merged")
         else:
-            st.warning("No heart rate found in Strava file")
-
-    df = df.reset_index(drop=True)
-
-    st.write("Records:", len(df))
+            st.warning("No heart rate data found in HR file")
 
     # =======================
     # METRICS
@@ -113,102 +92,71 @@ if bosch_file:
         col1.metric("Distance", "N/A")
 
     if "power" in df.columns:
-        avg_power = df["power"].mean()
-        col2.metric("Avg Power (W)", f"{avg_power:.0f}")
+        col2.metric("Avg Power (W)", f"{df['power'].mean():.0f}")
         col3.metric("Max Power (W)", f"{df['power'].max():.0f}")
     else:
         col2.metric("Avg Power", "N/A")
         col3.metric("Max Power", "N/A")
 
     # =======================
-    # CHART (FIXED)
+    # CHART (DUAL AXIS)
     # =======================
     st.subheader("📈 Power, Altitude & Heart Rate")
 
-    chart_df = pd.DataFrame()
+    fig = go.Figure()
 
     if "power" in df.columns:
-        chart_df["Power"] = df["power"]
+        power_smooth = pd.Series(df["power"]).rolling(10, min_periods=1).mean()
+
+        fig.add_trace(go.Scatter(
+            y=power_smooth,
+            name="Power (W)",
+            yaxis="y1"
+        ))
 
     if "altitude" in df.columns:
-        chart_df["Altitude"] = df["altitude"]
+        fig.add_trace(go.Scatter(
+            y=df["altitude"],
+            name="Altitude (m)",
+            yaxis="y2"
+        ))
 
-    if "heart_rate" in df.columns:
-        chart_df["Heart Rate"] = df["heart_rate"]
+    if "Heart Rate" in df.columns:
+        fig.add_trace(go.Scatter(
+            y=df["Heart Rate"],
+            name="Heart Rate (bpm)",
+            yaxis="y3"
+        ))
 
-    chart_df = chart_df.dropna(how="all").reset_index()
+    fig.update_layout(
+        xaxis=dict(title="Time"),
 
-    if not chart_df.empty:
+        yaxis=dict(
+            title="Power (W)",
+            side="left"
+        ),
 
-        # Smooth signals
-        if "Power" in chart_df.columns:
-            chart_df["Power Smooth"] = chart_df["Power"].rolling(
-                window=10, min_periods=1
-            ).mean()
+        yaxis2=dict(
+            title="Altitude (m)",
+            overlaying="y",
+            side="right"
+        ),
 
-        if "Heart Rate" in chart_df.columns:
-            chart_df["HR Smooth"] = chart_df["Heart Rate"].rolling(
-                window=15, min_periods=1
-            ).mean()
+        yaxis3=dict(
+            title="Heart Rate (bpm)",
+            overlaying="y",
+            side="right",
+            position=0.95
+        ),
 
-        chart_df = chart_df.rename(columns={"index": "Time"})
+        legend=dict(x=0, y=1.1, orientation="h"),
+        margin=dict(l=40, r=100, t=40, b=40)
+    )
 
-        fig = go.Figure()
-
-        # Power (LEFT AXIS)
-        if "Power Smooth" in chart_df.columns:
-            fig.add_trace(go.Scatter(
-                x=chart_df["Time"],
-                y=chart_df["Power Smooth"],
-                name="Power",
-                yaxis="y1"
-            ))
-
-        # Altitude (LEFT AXIS, LIGHT)
-        if "Altitude" in chart_df.columns:
-            altitude_adjusted = chart_df["Altitude"] - chart_df["Altitude"].min()
-
-            fig.add_trace(go.Scatter(
-                x=chart_df["Time"],
-                y=altitude_adjusted,
-                name="Altitude",
-                yaxis="y1",
-                opacity=0.3
-            ))
-
-        # Heart Rate (RIGHT AXIS)
-        if "HR Smooth" in chart_df.columns:
-            fig.add_trace(go.Scatter(
-                x=chart_df["Time"],
-                y=chart_df["HR Smooth"],
-                name="Heart Rate",
-                yaxis="y2"
-            ))
-
-        fig.update_layout(
-            xaxis=dict(title="Time"),
-
-            yaxis=dict(
-                title="Power / Altitude"
-            ),
-
-            yaxis2=dict(
-                title="Heart Rate (bpm)",
-                overlaying="y",
-                side="right"
-            ),
-
-            legend=dict(orientation="h"),
-            margin=dict(l=40, r=60, t=40, b=40)
-        )
-
-        st.plotly_chart(fig, use_container_width=True)
-
-    else:
-        st.warning("No chart data available")
+    st.plotly_chart(fig, use_container_width=True)
 
     # =======================
-    # MAP
+    # MAP (FIXED AUTO ZOOM)
     # =======================
     st.subheader("🗺️ Route Map")
 
@@ -220,7 +168,6 @@ if bosch_file:
         df["lon"] = pd.to_numeric(df["position_long"], errors="coerce") * (180 / 2**31)
 
         gps_df = df[["lat", "lon"]].dropna()
-
         gps_points = list(zip(gps_df["lat"], gps_df["lon"]))
 
     st.write("GPS points:", len(gps_points))
@@ -228,8 +175,6 @@ if bosch_file:
     if len(gps_points) > 1:
 
         m = folium.Map(
-            location=[gps_points[0][0], gps_points[0][1]],
-            zoom_start=13,
             tiles="CartoDB positron"
         )
 
@@ -240,10 +185,17 @@ if bosch_file:
             opacity=0.8
         ).add_to(m)
 
+        # ✅ AUTO FIT TO ROUTE
+        lats = [p[0] for p in gps_points]
+        lons = [p[1] for p in gps_points]
+
+        bounds = [[min(lats), min(lons)], [max(lats), max(lons)]]
+        m.fit_bounds(bounds)
+
         st_folium(m, width=900, height=500)
 
     else:
         st.warning("No valid GPS data")
 
 else:
-    st.info("Upload your Bosch FIT file to begin")
+    st.info("Upload at least the Flow FIT file to begin")
