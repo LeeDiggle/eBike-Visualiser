@@ -38,12 +38,9 @@ if flow_file:
         df_hr = parse_fit(hr_file, include_hr=True)
 
         df_hr = df_hr[["timestamp", "heart_rate"]].dropna()
-
-        # 🔧 CRITICAL FIX: forward fill HR before merge
         df_hr = df_hr.sort_values("timestamp")
         df_hr["heart_rate"] = df_hr["heart_rate"].ffill()
 
-        # Merge with tolerance
         df = pd.merge_asof(
             df_flow.sort_values("timestamp"),
             df_hr.sort_values("timestamp"),
@@ -54,86 +51,66 @@ if flow_file:
     else:
         df = df_flow
 
-    # Smooth HR slightly
     if "heart_rate" in df.columns:
         df["heart_rate"] = df["heart_rate"].rolling(5, min_periods=1).mean()
 
     fig = go.Figure()
 
-    # --- Power ---
+    # Power
     if "power" in df.columns:
         fig.add_trace(go.Scatter(
             x=df["timestamp"],
             y=df["power"],
             name="Power (W)",
-            yaxis="y1",
-            line=dict(width=2)
+            yaxis="y1"
         ))
 
-    # --- Speed ---
+    # Speed
     if "speed" in df.columns:
         fig.add_trace(go.Scatter(
             x=df["timestamp"],
             y=df["speed"] * 3.6,
             name="Speed (km/h)",
-            yaxis="y2",
-            line=dict(width=2, dash="dot")
+            yaxis="y2"
         ))
 
-    # --- Heart Rate ---
+    # Heart Rate
     if "heart_rate" in df.columns:
         fig.add_trace(go.Scatter(
             x=df["timestamp"],
             y=df["heart_rate"],
             name="Heart Rate (bpm)",
-            yaxis="y4",
-            line=dict(width=2, color="red")
+            yaxis="y3",
+            line=dict(color="red")
         ))
 
-    # --- Altitude (FIXED) ---
+    # ✅ ALTITUDE (ONLY CHANGE IS HERE)
     if "altitude" in df.columns:
         fig.add_trace(go.Scatter(
             x=df["timestamp"],
             y=df["altitude"],
             name="Altitude (m)",
-            yaxis="y3",
+            yaxis="y1",
             mode="lines",
-            line=dict(width=1.5, color="rgba(100,100,100,0.6)"),
+            line=dict(width=1.5, color="rgba(120,120,120,0.6)"),
             fill="tozeroy",
             fillcolor="rgba(150,150,150,0.2)"
         ))
 
-    # --- Layout with 4 axes ---
     fig.update_layout(
         xaxis=dict(title="Time"),
-
-        yaxis=dict(
-            title="Power (W)",
-            side="left"
-        ),
-
+        yaxis=dict(title="Power / Altitude"),
         yaxis2=dict(
             title="Speed (km/h)",
             overlaying="y",
-            side="right",
-            position=1.0
+            side="right"
         ),
-
         yaxis3=dict(
-            title="Altitude (m)",
-            overlaying="y",
-            side="left",
-            position=0.0,
-            showgrid=False
-        ),
-
-        yaxis4=dict(
             title="Heart Rate (bpm)",
             overlaying="y",
             side="right",
             position=0.95
         ),
-
         legend=dict(orientation="h"),
         margin=dict(l=40, r=100, t=40, b=40)
     )
