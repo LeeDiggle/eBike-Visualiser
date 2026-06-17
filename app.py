@@ -3,6 +3,7 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from fitparse import FitFile
+import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 st.title("🚴 eBike Ride Visualiser")
@@ -76,14 +77,11 @@ if bosch_file:
 
         if "heart_rate" in strava_df.columns:
 
-            # Keep only timestamp + HR
             hr_df = strava_df[["timestamp", "heart_rate"]].dropna()
 
-            # Sort for merge_asof
             df = df.sort_values("timestamp")
             hr_df = hr_df.sort_values("timestamp")
 
-            # Merge with tolerance (handles device time differences)
             df = pd.merge_asof(
                 df,
                 hr_df,
@@ -97,9 +95,6 @@ if bosch_file:
         else:
             st.warning("No heart rate found in Strava file")
 
-    # =======================
-    # BASIC INFO
-    # =======================
     df = df.reset_index(drop=True)
 
     st.write("Records:", len(df))
@@ -126,7 +121,7 @@ if bosch_file:
         col3.metric("Max Power", "N/A")
 
     # =======================
-    # CHART
+    # CHART (MULTI-AXIS)
     # =======================
     st.subheader("📈 Power, Altitude & Heart Rate")
 
@@ -145,13 +140,12 @@ if bosch_file:
 
     if not chart_df.empty:
 
-        # Smooth power
+        # Smooth signals
         if "Power" in chart_df.columns:
             chart_df["Power Smooth"] = chart_df["Power"].rolling(
                 window=10, min_periods=1
             ).mean()
 
-        # Smooth HR (slightly longer window)
         if "Heart Rate" in chart_df.columns:
             chart_df["HR Smooth"] = chart_df["Heart Rate"].rolling(
                 window=15, min_periods=1
@@ -159,18 +153,64 @@ if bosch_file:
 
         chart_df = chart_df.rename(columns={"index": "Time"})
 
-        plot_cols = []
+        fig = go.Figure()
 
+        # Power (LEFT AXIS)
         if "Power Smooth" in chart_df.columns:
-            plot_cols.append("Power Smooth")
+            fig.add_trace(go.Scatter(
+                x=chart_df["Time"],
+                y=chart_df["Power Smooth"],
+                name="Power",
+                yaxis="y1"
+            ))
 
-        if "Altitude" in chart_df.columns:
-            plot_cols.append("Altitude")
-
+        # Heart Rate (RIGHT AXIS)
         if "HR Smooth" in chart_df.columns:
-            plot_cols.append("HR Smooth")
+            fig.add_trace(go.Scatter(
+                x=chart_df["Time"],
+                y=chart_df["HR Smooth"],
+                name="Heart Rate",
+                yaxis="y2"
+            ))
 
-        st.line_chart(chart_df, x="Time", y=plot_cols)
+        # Altitude (THIRD AXIS)
+        if "Altitude" in chart_df.columns:
+            altitude_adjusted = chart_df["Altitude"] - chart_df["Altitude"].min()
+
+            fig.add_trace(go.Scatter(
+                x=chart_df["Time"],
+                y=altitude_adjusted,
+                name="Altitude",
+                yaxis="y3",
+                opacity=0.4
+            ))
+
+        fig.update_layout(
+            xaxis=dict(title="Time"),
+
+            yaxis=dict(
+                title="Power (W)"
+            ),
+
+            yaxis2=dict(
+                title="Heart Rate (bpm)",
+                overlaying="y",
+                side="right"
+            ),
+
+            yaxis3=dict(
+                title="Altitude (relative m)",
+                anchor="free",
+                overlaying="y",
+                side="right",
+                position=1.08
+            ),
+
+            legend=dict(orientation="h"),
+            margin=dict(l=40, r=100, t=40, b=40)
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
 
     else:
         st.warning("No chart data available")
