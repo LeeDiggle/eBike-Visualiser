@@ -130,12 +130,17 @@ if flow_file:
             yaxis="y1"
         ))
 
+    # ✅ ONLY CHANGE IS HERE (altitude styling)
     if "altitude" in df.columns:
         fig.add_trace(go.Scatter(
             x=df["timestamp"],
             y=df["altitude"],
             name="Altitude (m)",
-            yaxis="y2"
+            yaxis="y2",
+            mode="lines",
+            line=dict(width=1.5, color="rgba(120,120,120,0.6)"),
+            fill="tozeroy",
+            fillcolor="rgba(150,150,150,0.2)"
         ))
 
     if "Heart Rate" in df.columns:
