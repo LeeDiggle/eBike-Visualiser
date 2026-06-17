@@ -15,19 +15,28 @@ if st.button("🔄 Reset App"):
     st.rerun()
 
 # =======================
-# FILE UPLOADER
+# FILE UPLOADERS
 # =======================
-uploaded_file = st.file_uploader(
-    "Upload your FIT file",
-    type=None,
-    key="fit_upload_final"
-)
+col1, col2 = st.columns(2)
+
+with col1:
+    bosch_file = st.file_uploader(
+        "Upload Bosch Flow FIT file",
+        type=None,
+        key="bosch_fit"
+    )
+
+with col2:
+    strava_file = st.file_uploader(
+        "Upload Strava FIT file (Heart Rate)",
+        type=None,
+        key="strava_fit"
+    )
 
 # =======================
-# MAIN PROCESS
+# FIT → DATAFRAME FUNCTION
 # =======================
-if uploaded_file:
-
+def fit_to_df(uploaded_file):
     fitfile = FitFile(uploaded_file)
 
     records = []
@@ -39,10 +48,58 @@ if uploaded_file:
 
     df = pd.DataFrame(records)
 
-    if df.empty:
-        st.error("No data found in FIT file")
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    return df
+
+
+# =======================
+# MAIN PROCESS
+# =======================
+if bosch_file:
+
+    bosch_df = fit_to_df(bosch_file)
+
+    if bosch_df.empty:
+        st.error("No data in Bosch FIT file")
         st.stop()
 
+    df = bosch_df.copy()
+
+    # =======================
+    # MERGE HEART RATE
+    # =======================
+    if strava_file:
+
+        strava_df = fit_to_df(strava_file)
+
+        if "heart_rate" in strava_df.columns:
+
+            # Keep only timestamp + HR
+            hr_df = strava_df[["timestamp", "heart_rate"]].dropna()
+
+            # Sort for merge_asof
+            df = df.sort_values("timestamp")
+            hr_df = hr_df.sort_values("timestamp")
+
+            # Merge with tolerance (handles device time differences)
+            df = pd.merge_asof(
+                df,
+                hr_df,
+                on="timestamp",
+                direction="nearest",
+                tolerance=pd.Timedelta("3s")
+            )
+
+            st.success("✅ Heart rate merged successfully")
+
+        else:
+            st.warning("No heart rate found in Strava file")
+
+    # =======================
+    # BASIC INFO
+    # =======================
     df = df.reset_index(drop=True)
 
     st.write("Records:", len(df))
@@ -69,9 +126,9 @@ if uploaded_file:
         col3.metric("Max Power", "N/A")
 
     # =======================
-    # CHART (SMOOTH + OVERLAY)
+    # CHART
     # =======================
-    st.subheader("📈 Power & Altitude")
+    st.subheader("📈 Power, Altitude & Heart Rate")
 
     chart_df = pd.DataFrame()
 
@@ -81,14 +138,23 @@ if uploaded_file:
     if "altitude" in df.columns:
         chart_df["Altitude"] = df["altitude"]
 
+    if "heart_rate" in df.columns:
+        chart_df["Heart Rate"] = df["heart_rate"]
+
     chart_df = chart_df.dropna(how="all").reset_index()
 
     if not chart_df.empty:
 
-        # Smooth power (reduces spikes)
+        # Smooth power
         if "Power" in chart_df.columns:
             chart_df["Power Smooth"] = chart_df["Power"].rolling(
                 window=10, min_periods=1
+            ).mean()
+
+        # Smooth HR (slightly longer window)
+        if "Heart Rate" in chart_df.columns:
+            chart_df["HR Smooth"] = chart_df["Heart Rate"].rolling(
+                window=15, min_periods=1
             ).mean()
 
         chart_df = chart_df.rename(columns={"index": "Time"})
@@ -101,13 +167,16 @@ if uploaded_file:
         if "Altitude" in chart_df.columns:
             plot_cols.append("Altitude")
 
+        if "HR Smooth" in chart_df.columns:
+            plot_cols.append("HR Smooth")
+
         st.line_chart(chart_df, x="Time", y=plot_cols)
 
     else:
         st.warning("No chart data available")
 
     # =======================
-    # GPS + MAP
+    # MAP
     # =======================
     st.subheader("🗺️ Route Map")
 
@@ -145,4 +214,4 @@ if uploaded_file:
         st.warning("No valid GPS data")
 
 else:
-    st.info("Upload a FIT file to begin")
+    st.info("Upload your Bosch FIT file to begin")
