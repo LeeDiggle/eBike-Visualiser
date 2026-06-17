@@ -121,7 +121,7 @@ if bosch_file:
         col3.metric("Max Power", "N/A")
 
     # =======================
-    # CHART (MULTI-AXIS)
+    # CHART (FIXED)
     # =======================
     st.subheader("📈 Power, Altitude & Heart Rate")
 
@@ -164,6 +164,18 @@ if bosch_file:
                 yaxis="y1"
             ))
 
+        # Altitude (LEFT AXIS, LIGHT)
+        if "Altitude" in chart_df.columns:
+            altitude_adjusted = chart_df["Altitude"] - chart_df["Altitude"].min()
+
+            fig.add_trace(go.Scatter(
+                x=chart_df["Time"],
+                y=altitude_adjusted,
+                name="Altitude",
+                yaxis="y1",
+                opacity=0.3
+            ))
+
         # Heart Rate (RIGHT AXIS)
         if "HR Smooth" in chart_df.columns:
             fig.add_trace(go.Scatter(
@@ -173,23 +185,11 @@ if bosch_file:
                 yaxis="y2"
             ))
 
-        # Altitude (THIRD AXIS)
-        if "Altitude" in chart_df.columns:
-            altitude_adjusted = chart_df["Altitude"] - chart_df["Altitude"].min()
-
-            fig.add_trace(go.Scatter(
-                x=chart_df["Time"],
-                y=altitude_adjusted,
-                name="Altitude",
-                yaxis="y3",
-                opacity=0.4
-            ))
-
         fig.update_layout(
             xaxis=dict(title="Time"),
 
             yaxis=dict(
-                title="Power (W)"
+                title="Power / Altitude"
             ),
 
             yaxis2=dict(
@@ -198,16 +198,8 @@ if bosch_file:
                 side="right"
             ),
 
-            yaxis3=dict(
-                title="Altitude (relative m)",
-                anchor="free",
-                overlaying="y",
-                side="right",
-                position=1.08
-            ),
-
             legend=dict(orientation="h"),
-            margin=dict(l=40, r=100, t=40, b=40)
+            margin=dict(l=40, r=60, t=40, b=40)
         )
 
         st.plotly_chart(fig, use_container_width=True)
