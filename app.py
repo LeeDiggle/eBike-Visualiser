@@ -24,10 +24,10 @@ with col1:
     flow_file = st.file_uploader("Upload Bosch Flow FIT file", type=None)
 
 with col2:
-    hr_file = st.file_uploader("Upload Strava HR FIT file", type=None)
+    hr_file = st.file_uploader("Upload HR FIT file (Garmin/Strava)", type=None)
 
 # =======================
-# FUNCTION TO PARSE FIT
+# PARSE FIT WITH TIME
 # =======================
 def parse_fit(file):
     fitfile = FitFile(file)
@@ -60,28 +60,38 @@ if flow_file:
     st.write("Flow records:", len(df))
 
     # =======================
-    # MERGE HEART RATE FILE (FIXED)
+    # TIME ALIGNMENT (KEY FIX)
+    # =======================
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df = df.sort_values("timestamp")
+
+    # =======================
+    # MERGE HR BY TIME
     # =======================
     if hr_file:
         hr_df = parse_fit(hr_file)
 
-        if "heart_rate" in hr_df.columns:
+        if "heart_rate" in hr_df.columns and "timestamp" in hr_df.columns:
 
-            hr_series = hr_df["heart_rate"].reset_index(drop=True)
+            hr_df["timestamp"] = pd.to_datetime(hr_df["timestamp"])
+            hr_df = hr_df.sort_values("timestamp")
 
-            # Create empty column first
-            df["Heart Rate"] = None
+            # Merge on nearest timestamp
+            df = pd.merge_asof(
+                df,
+                hr_df[["timestamp", "heart_rate"]],
+                on="timestamp",
+                direction="nearest",
+                tolerance=pd.Timedelta("5s")
+            )
 
-            # Fill only matching index range (no truncation)
-            max_len = min(len(df), len(hr_series))
-            df.loc[:max_len-1, "Heart Rate"] = hr_series.iloc[:max_len]
+            df.rename(columns={"heart_rate": "Heart Rate"}, inplace=True)
 
-            # Optional: forward fill to smooth gaps
-            df["Heart Rate"] = df["Heart Rate"].ffill()
+            st.success("Heart rate aligned by timestamp ✅")
 
-            st.success("Heart rate merged without truncating ride")
         else:
-            st.warning("No heart rate data found in HR file")
+            st.warning("HR file missing timestamp or heart_rate")
 
     # =======================
     # METRICS
@@ -114,6 +124,7 @@ if flow_file:
         power_smooth = pd.Series(df["power"]).rolling(10, min_periods=1).mean()
 
         fig.add_trace(go.Scatter(
+            x=df["timestamp"],
             y=power_smooth,
             name="Power (W)",
             yaxis="y1"
@@ -121,6 +132,7 @@ if flow_file:
 
     if "altitude" in df.columns:
         fig.add_trace(go.Scatter(
+            x=df["timestamp"],
             y=df["altitude"],
             name="Altitude (m)",
             yaxis="y2"
@@ -128,6 +140,7 @@ if flow_file:
 
     if "Heart Rate" in df.columns:
         fig.add_trace(go.Scatter(
+            x=df["timestamp"],
             y=df["Heart Rate"],
             name="Heart Rate (bpm)",
             yaxis="y3"
@@ -158,7 +171,7 @@ if flow_file:
     st.plotly_chart(fig, use_container_width=True)
 
     # =======================
-    # MAP (UNCHANGED)
+    # MAP
     # =======================
     st.subheader("🗺️ Route Map")
 
