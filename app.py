@@ -60,21 +60,26 @@ if flow_file:
     st.write("Flow records:", len(df))
 
     # =======================
-    # MERGE HEART RATE FILE
+    # MERGE HEART RATE FILE (FIXED)
     # =======================
     if hr_file:
         hr_df = parse_fit(hr_file)
 
         if "heart_rate" in hr_df.columns:
-            hr_df = hr_df[["heart_rate"]].reset_index(drop=True)
 
-            min_len = min(len(df), len(hr_df))
-            df = df.iloc[:min_len].copy()
-            hr_df = hr_df.iloc[:min_len].copy()
+            hr_series = hr_df["heart_rate"].reset_index(drop=True)
 
-            df["Heart Rate"] = hr_df["heart_rate"]
+            # Create empty column first
+            df["Heart Rate"] = None
 
-            st.success("Heart rate merged")
+            # Fill only matching index range (no truncation)
+            max_len = min(len(df), len(hr_series))
+            df.loc[:max_len-1, "Heart Rate"] = hr_series.iloc[:max_len]
+
+            # Optional: forward fill to smooth gaps
+            df["Heart Rate"] = df["Heart Rate"].ffill()
+
+            st.success("Heart rate merged without truncating ride")
         else:
             st.warning("No heart rate data found in HR file")
 
@@ -99,7 +104,7 @@ if flow_file:
         col3.metric("Max Power", "N/A")
 
     # =======================
-    # CHART (DUAL AXIS)
+    # CHART
     # =======================
     st.subheader("📈 Power, Altitude & Heart Rate")
 
@@ -131,10 +136,7 @@ if flow_file:
     fig.update_layout(
         xaxis=dict(title="Time"),
 
-        yaxis=dict(
-            title="Power (W)",
-            side="left"
-        ),
+        yaxis=dict(title="Power (W)", side="left"),
 
         yaxis2=dict(
             title="Altitude (m)",
@@ -156,7 +158,7 @@ if flow_file:
     st.plotly_chart(fig, use_container_width=True)
 
     # =======================
-    # MAP (FIXED AUTO ZOOM)
+    # MAP (UNCHANGED)
     # =======================
     st.subheader("🗺️ Route Map")
 
@@ -174,9 +176,7 @@ if flow_file:
 
     if len(gps_points) > 1:
 
-        m = folium.Map(
-            tiles="CartoDB positron"
-        )
+        m = folium.Map(tiles="CartoDB positron")
 
         folium.PolyLine(
             gps_points,
@@ -185,7 +185,6 @@ if flow_file:
             opacity=0.8
         ).add_to(m)
 
-        # ✅ AUTO FIT TO ROUTE
         lats = [p[0] for p in gps_points]
         lons = [p[1] for p in gps_points]
 
